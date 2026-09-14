@@ -3,5 +3,5 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 module_dir="$repo_root/agentgrid-orchestrator"
-export PYTHONPATH="$module_dir${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$module_dir:$repo_root/agentgrid-agent:$repo_root/agentgrid-context-router:$repo_root/agentgrid-dispatcher:$repo_root/agentgrid-event-queue:$repo_root/agentgrid-monitor:$repo_root/agentgrid-policy:$repo_root/agentgrid-project-context:$repo_root/agentgrid-project-manager:$repo_root/agentgrid-project-memory:$repo_root/agentgrid-tmux${PYTHONPATH:+:$PYTHONPATH}"
 exec "${PYTHON:-python3.11}" -m agentgrid_orchestrator.cli "$@"

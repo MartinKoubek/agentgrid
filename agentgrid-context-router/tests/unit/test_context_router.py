@@ -10,3 +10,16 @@ def test_router_continues_matching_running_agent() -> None:
 def test_router_starts_agent_for_known_project() -> None:
     decision = ContextRouter().route("fix bug", {"project_id": "demo", "project": {"id": "demo"}, "agents": []})
     assert decision.route == RouteType.START_AGENT
+
+
+def test_router_does_not_continue_on_generic_overlap() -> None:
+    context = {
+        "project_id": "demo",
+        "project": {"id": "demo"},
+        "agents": [{"id": "ag-001", "state": "RUNNING", "task": "work on scheduler"}],
+    }
+
+    decision = ContextRouter().route("investigate database migration", context)
+
+    assert decision.route == RouteType.START_AGENT
+    assert decision.agent_id is None

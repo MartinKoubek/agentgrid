@@ -8,13 +8,39 @@ version = "0.1.0"
 description = "agentgrid-orchestrator: high-level coordination boundary for AgentGrid."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+  "agentgrid-agent>=0.1.0",
+  "agentgrid-context-router>=0.1.0",
+  "agentgrid-dispatcher>=0.1.0",
+  "agentgrid-event-queue>=0.1.0",
+  "agentgrid-monitor>=0.1.0",
+  "agentgrid-policy>=0.1.0",
+  "agentgrid-project-context>=0.1.0",
+  "agentgrid-project-manager>=0.1.0",
+  "agentgrid-project-memory>=0.1.0",
+  "agentgrid-tmux>=0.1.0",
+]
 
 [project.scripts]
 agentgrid-orchestrator = "agentgrid_orchestrator.cli:main"
+
+[tool.uv.sources]
+agentgrid-agent = { path = "../agentgrid-agent", editable = true }
+agentgrid-context-router = { path = "../agentgrid-context-router", editable = true }
+agentgrid-dispatcher = { path = "../agentgrid-dispatcher", editable = true }
+agentgrid-event-queue = { path = "../agentgrid-event-queue", editable = true }
+agentgrid-monitor = { path = "../agentgrid-monitor", editable = true }
+agentgrid-policy = { path = "../agentgrid-policy", editable = true }
+agentgrid-project-context = { path = "../agentgrid-project-context", editable = true }
+agentgrid-project-manager = { path = "../agentgrid-project-manager", editable = true }
+agentgrid-project-memory = { path = "../agentgrid-project-memory", editable = true }
+agentgrid-tmux = { path = "../agentgrid-tmux", editable = true }
 
 [tool.setuptools]
 packages = ["agentgrid_orchestrator"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "e2e: tests that require local tmux and the full deterministic runtime path",
+]

@@ -4,9 +4,16 @@ This document defines the recommended implementation order for AgentGrid modules
 
 The main goal is to build the system incrementally, keeping every module independently runnable and testable.
 
+Status meanings:
+
+- `DONE`: Implemented and integrated through a tested runtime path.
+- `MVP`: Implemented as a standalone module with basic tests, but not fully integrated into production workflows.
+- `SKELETON`: Public shape exists, but behavior is intentionally minimal.
+- `PLANNED`: Not implemented yet.
+
 ## Phase 1 - Terminal and worker foundation
 
-- [x] **1. `agentgrid-tmux`**
+- [DONE] **1. `agentgrid-tmux`**
   - Independent tmux communication layer.
   - Discover sessions, windows, and panes.
   - Read pane output.
@@ -15,14 +22,14 @@ The main goal is to build the system incrementally, keeping every module indepen
   - Detect whether a pane/process is alive.
   - This is the lowest-level runtime dependency for the first AgentGrid version.
 
-- [x] **2. Agent Manager**
+- [DONE] **2. Agent Manager**
   - Give interactive workers stable AgentGrid identities.
   - Map `agent_id` to a runtime endpoint such as a tmux pane.
   - Start, stop, restart, inspect, read from, and write to workers.
   - Support agent adapters so the core remains independent of Codex, Claude Code, or another provider.
   - First adapter should preferably be a deterministic fake/test agent.
 
-- [x] **3. Monitor / Event Collector**
+- [DONE] **3. Monitor / Event Collector**
   - Observe agents, panes, shells, and processes.
   - Detect runtime changes without requiring the Master to poll everything itself.
   - Produce normalized events such as:
@@ -32,36 +39,36 @@ The main goal is to build the system incrementally, keeping every module indepen
     - `PROCESS_EXITED`
     - later `AGENT_WAITING_INPUT`
 
-- [x] **4. Shell Logger**
+- [MVP] **4. Shell Logger**
   - Record work performed in human shell panes.
   - Store command, stdout, stderr, exit code, and ordering/timestamps.
   - Make shell history understandable by project agents later.
 
 ## Phase 2 - Event processing
 
-- [x] **5. Event Queue**
+- [DONE] **5. Event Queue**
   - Store normalized events from many workers/projects.
   - Support persistence, priority, deduplication, acknowledgment, and parking.
   - Keep event production independent from event processing.
 
-- [x] **6. Dispatcher**
+- [DONE] **6. Dispatcher**
   - Deliver queued events to a consumer in a controlled way.
   - Initially deliver one active event at a time.
   - Allow `WAITING_USER` events to be parked so unrelated work can continue.
 
 ## Phase 3 - Project model and persistence
 
-- [x] **7. Project Manager**
+- [DONE] **7. Project Manager**
   - Introduce stable project identity.
   - Track repository/path, workspace mapping, active agents, configuration, and last activity.
   - Support opening, listing, restoring, and closing projects.
 
-- [x] **8. Persistence Layer**
+- [MVP] **8. Persistence Layer**
   - Persist runtime metadata independently of any AI conversation.
   - Store projects, agents, events, queue state, and module state.
   - Start simple; SQLite or another local persistent store is sufficient for V1.
 
-- [x] **9. Project Memory**
+- [MVP] **9. Project Memory**
   - Store long-term project knowledge.
   - Initial categories:
     - Project State
@@ -71,13 +78,13 @@ The main goal is to build the system incrementally, keeping every module indepen
 
 ## Phase 4 - Context and routing
 
-- [x] **10. Project Context Service**
+- [DONE] **10. Project Context Service**
   - Build a compact structured context package for a project.
   - Combine persistent and live context.
   - Sources may include Project Manager, Agent Manager, Project Memory, shell logs, events, Git state, and test state.
   - Support summary and detailed views.
 
-- [x] **11. Context Router**
+- [DONE] **11. Context Router**
   - Decide where a new request belongs.
   - Possible results:
     - continue an existing agent/thread,
@@ -88,14 +95,14 @@ The main goal is to build the system incrementally, keeping every module indepen
 
 ## Phase 5 - High-level orchestration
 
-- [x] **12. Policy Engine**
+- [MVP] **12. Policy Engine**
   - Provide explicit action decisions:
     - `ALLOW`
     - `ASK_USER`
     - `DENY`
   - Keep approval and safety rules outside the Master reasoning layer.
 
-- [x] **13. Orchestrator / Master**
+- [DONE] **13. Orchestrator / Master**
   - Receive user requests and dispatched events.
   - Ask Context Router where work belongs.
   - Request project context.
@@ -105,11 +112,11 @@ The main goal is to build the system incrementally, keeping every module indepen
 
 ## Phase 6 - Build, test, and autonomous iteration
 
-- [x] **14. Execution / Test Manager**
+- [MVP] **14. Execution / Test Manager**
   - Provide generic build, test, deploy, and verification workflows.
   - Keep platform-specific behavior behind adapters.
 
-- [x] **15. E2E Driver Adapters**
+- [SKELETON] **15. E2E Driver Adapters**
   - Add project-specific execution adapters as needed.
   - Examples:
     - Android / ADB / Emulator
@@ -121,13 +128,13 @@ The main goal is to build the system incrementally, keeping every module indepen
 
 ## Phase 7 - Recovery and robustness
 
-- [x] **16. Recovery Manager**
+- [SKELETON] **16. Recovery Manager**
   - Reconcile persisted AgentGrid state with live runtime state after restart.
   - Rediscover existing tmux panes and running agents where possible.
   - Detect stale registrations and missing resources.
   - Avoid duplicating already-running workers.
 
-- [x] **17. Observability / Diagnostics**
+- [MVP] **17. Observability / Diagnostics**
   - Centralize structured logging and diagnostics.
   - Make it possible to answer:
     - what happened,
@@ -138,11 +145,11 @@ The main goal is to build the system incrementally, keeping every module indepen
 
 ## Phase 8 - External systems (V2)
 
-- [x] **18. Connector Framework**
+- [SKELETON] **18. Connector Framework**
   - Define a generic interface for external systems.
   - Connectors should emit normalized AgentGrid events and expose actions through stable APIs.
 
-- [x] **19. External Connectors**
+- [PLANNED] **19. External Connectors**
   - Add integrations incrementally, for example:
     - Email
     - Slack
@@ -150,7 +157,7 @@ The main goal is to build the system incrementally, keeping every module indepen
     - Calendar
   - Keep provider-specific logic inside each connector.
 
-- [x] **20. Cross-system Context Resolution**
+- [SKELETON] **20. Cross-system Context Resolution**
   - Associate external events with AgentGrid projects even when the project name is not explicitly present.
   - Use sender, content, history, active work, and Project Memory.
   - Ask the user when confidence is too low.
@@ -158,6 +165,11 @@ The main goal is to build the system incrementally, keeping every module indepen
 ---
 
 # Recommended first milestones
+
+Milestone status:
+
+- Milestone A through D are implemented for the deterministic fake-agent runtime slice.
+- Real Codex integration, external connectors, platform E2E drivers, and autonomous coding loops remain planned or skeleton work.
 
 ## Milestone A - Managed worker
 

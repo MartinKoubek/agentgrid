@@ -47,7 +47,7 @@ class Monitor:
             return events
 
         if previous.output_digest != current.output_digest:
-            events.append(self._event(EventType.AGENT_OUTPUT_CHANGED, agent, priority=50))
+            events.append(self._event(EventType.AGENT_OUTPUT_CHANGED, agent, priority=50, output_digest=current.output_digest))
 
         if previous.state == AgentState.RUNNING.value and agent.state == AgentState.STOPPED:
             events.append(self._event(EventType.AGENT_EXITED, agent, priority=80))

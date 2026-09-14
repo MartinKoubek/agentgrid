@@ -151,7 +151,7 @@ Primary implemented modules:
 - `agentgrid-project-context/`: Builds context packages from persistent and live project information.
 - `agentgrid-context-router/`: Chooses whether work should continue an existing agent, start a new agent, use another project, or create a project.
 - `agentgrid-policy/`: Returns explicit `ALLOW`, `ASK_USER`, or `DENY` decisions for actions.
-- `agentgrid-orchestrator/`: Defines the high-level Master boundary. The CLI currently uses safe no-op dependencies and does not yet launch real Codex workers.
+- `agentgrid-orchestrator/`: Defines the high-level Master boundary. The CLI can run the deterministic fake-agent vertical slice with `--runtime-root`, but it does not yet launch real Codex workers.
 - `agentgrid-execution/`: Runs builds, tests, deployments, and validation workflows behind adapters.
 - `agentgrid-recovery/`: Reconciles persisted AgentGrid state with live runtime state after restart.
 - `agentgrid-observability/`: Provides structured diagnostics and logging primitives.
@@ -206,7 +206,7 @@ Orchestrator examples:
 ./bin/agentgrid-orchestrator event '{"type":"AGENT_EXITED","agent_id":"ag-001"}' --json
 ```
 
-Do not describe `agentgrid-orchestrator` as a working Codex Master yet. It is currently the Master boundary with safe no-op CLI wiring. A real Codex adapter or Codex-launching Master path should be added explicitly before claiming that capability.
+Do not describe `agentgrid-orchestrator` as a working Codex Master yet. It is currently the Master boundary with deterministic fake-agent runtime wiring. A real Codex adapter or Codex-launching Master path should be added explicitly before claiming that capability.
 
 ## Validation Workflow
 
@@ -215,7 +215,7 @@ Run focused tests inside the module being changed first. For broader validation 
 ```sh
 for d in agentgrid-tmux agentgrid-agent agentgrid-monitor agentgrid-shell-logger agentgrid-event-queue agentgrid-dispatcher agentgrid-project-manager agentgrid-persistence agentgrid-project-memory agentgrid-project-context agentgrid-context-router agentgrid-policy agentgrid-orchestrator agentgrid-execution agentgrid-recovery agentgrid-observability agentgrid-connectors agentgrid-cross-context; do
   echo "--- $d"
-  (cd "$d" && PYTHONPATH=.:../agentgrid-agent:../agentgrid-tmux:../agentgrid-event-queue python3.11 -m pytest -q) || exit 1
+  (cd "$d" && PYTHONPATH=.:../agentgrid-agent:../agentgrid-tmux:../agentgrid-event-queue:../agentgrid-dispatcher:../agentgrid-monitor:../agentgrid-project-manager:../agentgrid-project-memory:../agentgrid-project-context:../agentgrid-context-router:../agentgrid-policy python3.11 -m pytest -q) || exit 1
 done
 ```
 

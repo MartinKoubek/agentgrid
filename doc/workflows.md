@@ -8,6 +8,10 @@ Example request:
 Fix the Android login bug.
 ```
 
+The current tested runtime path uses the deterministic fake agent. It can start one fake worker for a new request, continue that worker for related work, start a second worker for unrelated work, enqueue monitor events, and dispatch those events back to the Orchestrator.
+
+Real Codex workers, user-input interpretation, and platform E2E drivers are planned separately.
+
 ```mermaid
 sequenceDiagram
     actor U as User

@@ -49,6 +49,34 @@ flowchart TD
     MASTER --> EXEC
 ```
 
+## Runtime composition
+
+`agentgrid-orchestrator/agentgrid_orchestrator/runtime.py` is the current composition root. It is allowed to instantiate concrete module implementations and wire them together while lower-level modules keep depending on their direct interfaces.
+
+The implemented V1 vertical slice uses the deterministic `fake` agent adapter:
+
+```text
+User request
+    -> Orchestrator
+    -> Project Context Service
+    -> Context Router
+    -> Agent Manager
+    -> agentgrid-tmux
+    -> Fake Agent
+```
+
+Runtime observations use the event path:
+
+```text
+Fake Agent / runtime
+    -> Monitor
+    -> Event Queue
+    -> Dispatcher
+    -> Orchestrator
+```
+
+Real Codex workers and Codex-specific protocol parsing are not implemented yet.
+
 ## Core communication principle
 
 ```mermaid
