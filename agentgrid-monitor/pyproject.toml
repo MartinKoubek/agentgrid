@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentgrid-monitor"
+version = "0.1.0"
+description = "agentgrid-monitor: standalone monitor and event collector for AgentGrid runtimes."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "agentgrid-agent>=0.1.0",
+  "agentgrid-tmux>=0.1.0",
+]
+
+[project.scripts]
+agentgrid-monitor = "agentgrid_monitor.cli:main"
+
+[tool.uv.sources]
+agentgrid-agent = { path = "../agentgrid-agent", editable = true }
+agentgrid-tmux = { path = "../agentgrid-tmux", editable = true }
+
+[tool.setuptools]
+packages = ["agentgrid_monitor"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "e2e: tests that require local tmux and agent runtime modules",
+]

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+module_dir="$(cd "$script_dir/.." && pwd)"
+export PYTHONPATH="$module_dir${PYTHONPATH:+:$PYTHONPATH}"
+exec "${PYTHON:-python3.11}" -m agentgrid_policy.cli "$@"

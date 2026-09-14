@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentgrid-connectors"
+version = "0.1.0"
+description = "agentgrid-connectors: external connector interfaces and local stub connectors."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+agentgrid-connectors = "agentgrid_connectors.cli:main"
+
+[tool.setuptools]
+packages = ["agentgrid_connectors"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

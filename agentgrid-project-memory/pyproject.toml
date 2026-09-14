@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentgrid-project-memory"
+version = "0.1.0"
+description = "agentgrid-project-memory: project-owned state, decisions, and lessons store."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+agentgrid-project-memory = "agentgrid_project_memory.cli:main"
+
+[tool.setuptools]
+packages = ["agentgrid_project_memory"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

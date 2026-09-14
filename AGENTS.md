@@ -134,6 +134,101 @@ Additional logical components may exist inside these modules rather than as sepa
 - Configuration Manager loads global and per-project configuration for providers, paths, policies, adapters, logging, timeouts, and related settings.
 - Observability and Logging provide central diagnostics so it is easy to reconstruct what happened, which project or agent was involved, which event occurred, and why something failed.
 
+## Repository Layout
+
+AgentGrid is currently organized as standalone Python modules with matching root `bin/` wrappers. Each module should remain independently runnable and testable before another module depends on it.
+
+Primary implemented modules:
+
+- `agentgrid-tmux/`: Provides `tmuxio`, the tmux communication layer. It owns tmux command execution, discovery, pane inspection, read, write, stream, handshake, models, and errors.
+- `agentgrid-agent/`: Provides the Agent Runtime Manager. It maps stable `agent_id` values to tmux panes, tracks runtime process identity, and delegates all pane I/O through `tmuxio`.
+- `agentgrid-monitor/`: Observes runtime state and emits normalized observations without adding high-level interpretation.
+- `agentgrid-event-queue/`: Persists normalized events with ordering, priority, deduplication, parking, and acknowledgement.
+- `agentgrid-dispatcher/`: Claims queued events and delivers one active item at a time to a handler.
+- `agentgrid-project-manager/`: Tracks project identity, paths, state, and workspace metadata.
+- `agentgrid-persistence/`: Provides simple generic persistent storage primitives.
+- `agentgrid-project-memory/`: Stores project-owned state, decision log entries, and lessons learned.
+- `agentgrid-project-context/`: Builds context packages from persistent and live project information.
+- `agentgrid-context-router/`: Chooses whether work should continue an existing agent, start a new agent, use another project, or create a project.
+- `agentgrid-policy/`: Returns explicit `ALLOW`, `ASK_USER`, or `DENY` decisions for actions.
+- `agentgrid-orchestrator/`: Defines the high-level Master boundary. The CLI currently uses safe no-op dependencies and does not yet launch real Codex workers.
+- `agentgrid-execution/`: Runs builds, tests, deployments, and validation workflows behind adapters.
+- `agentgrid-recovery/`: Reconciles persisted AgentGrid state with live runtime state after restart.
+- `agentgrid-observability/`: Provides structured diagnostics and logging primitives.
+- `agentgrid-connectors/`: Defines provider-specific external integrations behind connector interfaces.
+- `agentgrid-cross-context/`: Resolves external events to projects when project identity is implicit.
+- `agentgrid-shell-logger/`: Records human shell command activity and output for later context.
+
+Root wrapper scripts live in `bin/` and should be the easiest way to run modules from the repository root.
+
+## Running Locally
+
+Use the root wrappers from the repository root unless a module README says otherwise.
+
+Tmux I/O examples:
+
+```sh
+./bin/tmuxio panes --json
+./bin/tmuxio inspect %17 --json
+./bin/tmuxio read %17 --lines 100
+./bin/tmuxio write %17 "echo hello"
+./bin/tmuxio key %17 ENTER
+./bin/tmuxio follow %17
+./bin/tmuxio stop-follow %17
+```
+
+Agent runtime examples:
+
+```sh
+./bin/agentgrid-agent start --adapter fake
+./bin/agentgrid-agent list --json
+./bin/agentgrid-agent inspect ag-001 --json
+./bin/agentgrid-agent send ag-001 "hello"
+./bin/agentgrid-agent read ag-001
+./bin/agentgrid-agent stop ag-001
+```
+
+Isolated tmux demo:
+
+```sh
+tmux -L agentgrid-demo start-server
+./bin/agentgrid-agent --socket-name agentgrid-demo --registry /tmp/agentgrid-agents.sqlite3 start --adapter fake
+./bin/agentgrid-agent --socket-name agentgrid-demo --registry /tmp/agentgrid-agents.sqlite3 send ag-001 "hello"
+./bin/agentgrid-agent --socket-name agentgrid-demo --registry /tmp/agentgrid-agents.sqlite3 read ag-001
+./bin/agentgrid-agent --socket-name agentgrid-demo --registry /tmp/agentgrid-agents.sqlite3 stop ag-001
+tmux -L agentgrid-demo kill-server
+```
+
+Orchestrator examples:
+
+```sh
+./bin/agentgrid-orchestrator request "fix failing test" --json
+./bin/agentgrid-orchestrator event '{"type":"AGENT_EXITED","agent_id":"ag-001"}' --json
+```
+
+Do not describe `agentgrid-orchestrator` as a working Codex Master yet. It is currently the Master boundary with safe no-op CLI wiring. A real Codex adapter or Codex-launching Master path should be added explicitly before claiming that capability.
+
+## Validation Workflow
+
+Run focused tests inside the module being changed first. For broader validation from the repository root, use the module loop below and keep dependency paths explicit until packaging is unified:
+
+```sh
+for d in agentgrid-tmux agentgrid-agent agentgrid-monitor agentgrid-shell-logger agentgrid-event-queue agentgrid-dispatcher agentgrid-project-manager agentgrid-persistence agentgrid-project-memory agentgrid-project-context agentgrid-context-router agentgrid-policy agentgrid-orchestrator agentgrid-execution agentgrid-recovery agentgrid-observability agentgrid-connectors agentgrid-cross-context; do
+  echo "--- $d"
+  (cd "$d" && PYTHONPATH=.:../agentgrid-agent:../agentgrid-tmux:../agentgrid-event-queue python3.11 -m pytest -q) || exit 1
+done
+```
+
+For changes involving tmux behavior, prefer isolated tmux sockets such as `tmux -L agentgrid-demo` and clean them up after the test.
+
+## Durable Lessons
+
+- Do not confuse pane liveness with agent liveness. A pane can remain alive after the controlled worker process exits.
+- Prefer stable tmux pane IDs such as `%17` for cross-module references because session, window, and pane indices can move.
+- Do not actively handshake arbitrary human shells. Only AgentGrid-created controlled endpoints should receive active application handshakes.
+- Keep adapter registration pluggable. Add future Codex, Claude, or fake adapters through injected maps or registries, not hard-coded manager branches.
+- Keep event and monitor layers free of Codex-specific output interpretation until a dedicated protocol layer exists.
+
 ## State and Persistence
 
 Important runtime and project state should be explicit and persistable.

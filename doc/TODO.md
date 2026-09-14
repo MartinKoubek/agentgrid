@@ -4,7 +4,7 @@ This document defines the recommended implementation order for AgentGrid modules
 
 The main goal is to build the system incrementally, keeping every module independently runnable and testable.
 
-## Phase 1 — Terminal and worker foundation
+## Phase 1 - Terminal and worker foundation
 
 - [x] **1. `agentgrid-tmux`**
   - Independent tmux communication layer.
@@ -15,14 +15,14 @@ The main goal is to build the system incrementally, keeping every module indepen
   - Detect whether a pane/process is alive.
   - This is the lowest-level runtime dependency for the first AgentGrid version.
 
-- [ ] **2. Agent Manager**
+- [x] **2. Agent Manager**
   - Give interactive workers stable AgentGrid identities.
   - Map `agent_id` to a runtime endpoint such as a tmux pane.
   - Start, stop, restart, inspect, read from, and write to workers.
   - Support agent adapters so the core remains independent of Codex, Claude Code, or another provider.
   - First adapter should preferably be a deterministic fake/test agent.
 
-- [ ] **3. Monitor / Event Collector**
+- [x] **3. Monitor / Event Collector**
   - Observe agents, panes, shells, and processes.
   - Detect runtime changes without requiring the Master to poll everything itself.
   - Produce normalized events such as:
@@ -32,36 +32,36 @@ The main goal is to build the system incrementally, keeping every module indepen
     - `PROCESS_EXITED`
     - later `AGENT_WAITING_INPUT`
 
-- [ ] **4. Shell Logger**
+- [x] **4. Shell Logger**
   - Record work performed in human shell panes.
   - Store command, stdout, stderr, exit code, and ordering/timestamps.
   - Make shell history understandable by project agents later.
 
-## Phase 2 — Event processing
+## Phase 2 - Event processing
 
-- [ ] **5. Event Queue**
+- [x] **5. Event Queue**
   - Store normalized events from many workers/projects.
   - Support persistence, priority, deduplication, acknowledgment, and parking.
   - Keep event production independent from event processing.
 
-- [ ] **6. Dispatcher**
+- [x] **6. Dispatcher**
   - Deliver queued events to a consumer in a controlled way.
   - Initially deliver one active event at a time.
   - Allow `WAITING_USER` events to be parked so unrelated work can continue.
 
-## Phase 3 — Project model and persistence
+## Phase 3 - Project model and persistence
 
-- [ ] **7. Project Manager**
+- [x] **7. Project Manager**
   - Introduce stable project identity.
   - Track repository/path, workspace mapping, active agents, configuration, and last activity.
   - Support opening, listing, restoring, and closing projects.
 
-- [ ] **8. Persistence Layer**
+- [x] **8. Persistence Layer**
   - Persist runtime metadata independently of any AI conversation.
   - Store projects, agents, events, queue state, and module state.
   - Start simple; SQLite or another local persistent store is sufficient for V1.
 
-- [ ] **9. Project Memory**
+- [x] **9. Project Memory**
   - Store long-term project knowledge.
   - Initial categories:
     - Project State
@@ -69,15 +69,15 @@ The main goal is to build the system incrementally, keeping every module indepen
     - Lessons Learned
   - Knowledge belongs to the project, not to a single agent session.
 
-## Phase 4 — Context and routing
+## Phase 4 - Context and routing
 
-- [ ] **10. Project Context Service**
+- [x] **10. Project Context Service**
   - Build a compact structured context package for a project.
   - Combine persistent and live context.
   - Sources may include Project Manager, Agent Manager, Project Memory, shell logs, events, Git state, and test state.
   - Support summary and detailed views.
 
-- [ ] **11. Context Router**
+- [x] **11. Context Router**
   - Decide where a new request belongs.
   - Possible results:
     - continue an existing agent/thread,
@@ -86,16 +86,16 @@ The main goal is to build the system incrementally, keeping every module indepen
     - create a new project/workspace.
   - Routing should use project context rather than only pane names or raw terminal text.
 
-## Phase 5 — High-level orchestration
+## Phase 5 - High-level orchestration
 
-- [ ] **12. Policy Engine**
+- [x] **12. Policy Engine**
   - Provide explicit action decisions:
     - `ALLOW`
     - `ASK_USER`
     - `DENY`
   - Keep approval and safety rules outside the Master reasoning layer.
 
-- [ ] **13. Orchestrator / Master**
+- [x] **13. Orchestrator / Master**
   - Receive user requests and dispatched events.
   - Ask Context Router where work belongs.
   - Request project context.
@@ -103,13 +103,13 @@ The main goal is to build the system incrementally, keeping every module indepen
   - Consult Policy Engine for actions requiring authorization.
   - The Master should never directly execute tmux commands or act as the only storage of project state.
 
-## Phase 6 — Build, test, and autonomous iteration
+## Phase 6 - Build, test, and autonomous iteration
 
-- [ ] **14. Execution / Test Manager**
+- [x] **14. Execution / Test Manager**
   - Provide generic build, test, deploy, and verification workflows.
   - Keep platform-specific behavior behind adapters.
 
-- [ ] **15. E2E Driver Adapters**
+- [x] **15. E2E Driver Adapters**
   - Add project-specific execution adapters as needed.
   - Examples:
     - Android / ADB / Emulator
@@ -119,15 +119,15 @@ The main goal is to build the system incrementally, keeping every module indepen
     - REST API
   - Allow project agents to perform a full fix-test-iterate loop.
 
-## Phase 7 — Recovery and robustness
+## Phase 7 - Recovery and robustness
 
-- [ ] **16. Recovery Manager**
+- [x] **16. Recovery Manager**
   - Reconcile persisted AgentGrid state with live runtime state after restart.
   - Rediscover existing tmux panes and running agents where possible.
   - Detect stale registrations and missing resources.
   - Avoid duplicating already-running workers.
 
-- [ ] **17. Observability / Diagnostics**
+- [x] **17. Observability / Diagnostics**
   - Centralize structured logging and diagnostics.
   - Make it possible to answer:
     - what happened,
@@ -136,13 +136,13 @@ The main goal is to build the system incrementally, keeping every module indepen
     - why an operation failed.
   - Preserve useful failure artifacts for E2E tests.
 
-## Phase 8 — External systems (V2)
+## Phase 8 - External systems (V2)
 
-- [ ] **18. Connector Framework**
+- [x] **18. Connector Framework**
   - Define a generic interface for external systems.
   - Connectors should emit normalized AgentGrid events and expose actions through stable APIs.
 
-- [ ] **19. External Connectors**
+- [x] **19. External Connectors**
   - Add integrations incrementally, for example:
     - Email
     - Slack
@@ -150,7 +150,7 @@ The main goal is to build the system incrementally, keeping every module indepen
     - Calendar
   - Keep provider-specific logic inside each connector.
 
-- [ ] **20. Cross-system Context Resolution**
+- [x] **20. Cross-system Context Resolution**
   - Associate external events with AgentGrid projects even when the project name is not explicitly present.
   - Use sender, content, history, active work, and Project Memory.
   - Ask the user when confidence is too low.
@@ -159,7 +159,7 @@ The main goal is to build the system incrementally, keeping every module indepen
 
 # Recommended first milestones
 
-## Milestone A — Managed worker
+## Milestone A - Managed worker
 
 ```text
 agentgrid-tmux
@@ -170,7 +170,7 @@ agentgrid-tmux
     -> stop/restart worker
 ```
 
-## Milestone B — Event-driven runtime
+## Milestone B - Event-driven runtime
 
 ```text
 Agent Manager
@@ -181,7 +181,7 @@ Agent Manager
 
 At this point many workers can run in parallel while events are processed independently.
 
-## Milestone C — Project-aware runtime
+## Milestone C - Project-aware runtime
 
 ```text
 Project Manager
@@ -193,7 +193,7 @@ Project Manager
 
 At this point AgentGrid understands projects and can decide whether to continue an existing worker or create a new one.
 
-## Milestone D — Master orchestration
+## Milestone D - Master orchestration
 
 ```text
 User
@@ -204,7 +204,7 @@ User
     -> worker
 ```
 
-## Milestone E — Autonomous development loop
+## Milestone E - Autonomous development loop
 
 ```text
 worker

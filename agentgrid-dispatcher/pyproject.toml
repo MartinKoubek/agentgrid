@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentgrid-dispatcher"
+version = "0.1.0"
+description = "agentgrid-dispatcher: standalone controlled event delivery for AgentGrid."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["agentgrid-event-queue>=0.1.0"]
+
+[project.scripts]
+agentgrid-dispatcher = "agentgrid_dispatcher.cli:main"
+
+[tool.uv.sources]
+agentgrid-event-queue = { path = "../agentgrid-event-queue", editable = true }
+
+[tool.setuptools]
+packages = ["agentgrid_dispatcher"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

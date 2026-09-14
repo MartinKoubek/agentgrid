@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+module_dir="$(cd "$script_dir/.." && pwd)"
+repo_root="$(cd "$module_dir/.." && pwd)"
+queue_module_dir="$repo_root/agentgrid-event-queue"
+
+export PYTHONPATH="$module_dir:$queue_module_dir${PYTHONPATH:+:$PYTHONPATH}"
+exec "${PYTHON:-python3.11}" -m agentgrid_dispatcher.cli "$@"

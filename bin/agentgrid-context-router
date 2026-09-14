@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+module_dir="$repo_root/agentgrid-context-router"
+export PYTHONPATH="$module_dir${PYTHONPATH:+:$PYTHONPATH}"
+exec "${PYTHON:-python3.11}" -m agentgrid_context_router.cli "$@"
