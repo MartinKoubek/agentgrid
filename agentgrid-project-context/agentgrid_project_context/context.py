@@ -45,12 +45,12 @@ class ProjectContextBuilder:
         if project is None:
             return []
 
-        active_agents = {str(agent_id) for agent_id in project.get("active_agents") or []}
+        project_agents = {str(agent_id) for agent_id in project_agent_ids(project)}
         agent_tasks = project.get("config", {}).get("agent_tasks", {}) if isinstance(project.get("config"), dict) else {}
         scoped_agents = []
         for agent in agents:
             agent_id = str(agent.get("id"))
-            if agent_id not in active_agents:
+            if agent_id not in project_agents:
                 continue
             if isinstance(agent_tasks, dict) and agent_id in agent_tasks:
                 agent["task"] = agent_tasks[agent_id]
@@ -98,7 +98,7 @@ class ProjectContextBuilder:
 
         if project is None:
             return []
-        active_agents = {str(agent_id) for agent_id in project.get("active_agents") or []}
+        project_agents = {str(agent_id) for agent_id in project_agent_ids(project)}
         scoped_events = []
         for event in events:
             payload = event.get("payload", {})
@@ -106,7 +106,7 @@ class ProjectContextBuilder:
                 continue
             if payload.get("project_id") == project_id:
                 scoped_events.append(event)
-            elif active_agents and str(payload.get("agent_id")) in active_agents:
+            elif project_agents and str(payload.get("agent_id")) in project_agents:
                 scoped_events.append(event)
         return scoped_events
 
@@ -117,3 +117,11 @@ def to_dict(value: object) -> dict[str, object]:
     if is_dataclass(value):
         return asdict(value)
     return dict(value)
+
+
+def project_agent_ids(project: dict[str, object]) -> list[object]:
+    agents = project.get("agents")
+    if agents is not None:
+        return list(agents) if isinstance(agents, list) else []
+    legacy_active_agents = project.get("active_agents")
+    return list(legacy_active_agents) if isinstance(legacy_active_agents, list) else []

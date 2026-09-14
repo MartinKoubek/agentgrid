@@ -60,7 +60,8 @@ Status meanings:
 
 - [DONE] **7. Project Manager**
   - Introduce stable project identity.
-  - Track repository/path, workspace mapping, active agents, configuration, and last activity.
+  - Track repository/path, workspace mapping, historical agent membership, configuration, and last activity.
+  - Keep runtime liveness in Agent Manager, not project state.
   - Support opening, listing, restoring, and closing projects.
 
 - [MVP] **8. Persistence Layer**

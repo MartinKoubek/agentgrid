@@ -19,7 +19,7 @@ class Project:
     repository: str | None = None
     state: ProjectState = ProjectState.OPEN
     workspace: dict[str, object] = field(default_factory=dict)
-    active_agents: list[str] = field(default_factory=list)
+    agents: list[str] = field(default_factory=list)
     config: dict[str, object] = field(default_factory=dict)
     created_at: float = field(default_factory=time)
     updated_at: float = field(default_factory=time)
@@ -29,6 +29,11 @@ class Project:
         now = time()
         self.updated_at = now
         self.last_activity_at = now
+
+    def add_agent(self, agent_id: str) -> None:
+        if agent_id not in self.agents:
+            self.agents.append(agent_id)
+            self.touch()
 
     def to_dict(self) -> dict[str, object]:
         data = asdict(self)
@@ -42,4 +47,9 @@ class Project:
     def from_json(cls, data: str) -> Project:
         values = json.loads(data)
         values["state"] = ProjectState(values["state"])
+        legacy_active_agents = values.pop("active_agents", [])
+        if "agents" not in values:
+            values["agents"] = legacy_active_agents
+        elif legacy_active_agents:
+            values["agents"] = list(dict.fromkeys([*values["agents"], *legacy_active_agents]))
         return cls(**values)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 import time
 import uuid
 
@@ -40,12 +41,15 @@ def require_tmux_runtime(tmp_path, socket_name: str) -> None:
     try:
         agent = runtime.agent_manager.start(adapter="fake", session="agentgrid-preflight")
         runtime.agent_manager.stop(agent.id)
-    except TmuxCommandError as exc:
-        if "Device not configured" in str(exc):
+    except (TmuxCommandError, subprocess.TimeoutExpired) as exc:
+        if "Device not configured" in str(exc) or "timed out" in str(exc):
             pytest.skip(f"tmux cannot allocate a test pane: {exc}")
         raise
     finally:
-        runtime.tmux.kill_server()
+        try:
+            runtime.tmux.kill_server()
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def dispatch_all(runtime: AgentGridRuntime) -> list[str]:
@@ -115,8 +119,9 @@ def test_runtime_vertical_slice_start_continue_queue_dispatch_and_exit(tmp_path)
         project = runtime.project_manager.get_project("project-a")
         events = runtime.event_queue.list(limit=100)
         assert len(runtime.project_manager.list_projects()) == 1
-        assert project.active_agents == [first.agent_id]
+        assert project.agents == [first.agent_id]
         assert runtime.agent_manager.inspect(first.agent_id).state == AgentState.STOPPED
+        assert runtime.project_owner_for_agent(first.agent_id) == "project-a"
         assert events
         assert all(event.status == EventStatus.ACKED for event in events)
     finally:
@@ -149,7 +154,7 @@ def test_runtime_starts_new_agent_for_unrelated_task(tmp_path) -> None:
         wait_for_output(runtime, second.agent_id, "ACK: investigate database migration")
 
         project = runtime.project_manager.get_project("project-a")
-        assert project.active_agents == ["ag-001", "ag-002"]
+        assert project.agents == ["ag-001", "ag-002"]
         assert len(runtime.agent_manager.list()) == 2
     finally:
         for agent in runtime.agent_manager.list():

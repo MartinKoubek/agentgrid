@@ -43,6 +43,18 @@ def test_dispatcher_requeues_failed_handler(tmp_path) -> None:
     assert queue.get(event.id).status == EventStatus.PENDING
 
 
+def test_dispatcher_requeues_unknown_handler_decision(tmp_path) -> None:
+    queue = EventQueue(tmp_path / "events.sqlite3")
+    event = queue.enqueue("AGENT_OUTPUT_CHANGED")
+    dispatcher = Dispatcher(queue)
+
+    result = dispatcher.dispatch_next(lambda _: "UNKNOWN")
+
+    assert result.decision == DispatchDecision.REQUEUE
+    assert result.error == "unknown dispatch decision: UNKNOWN"
+    assert queue.get(event.id).status == EventStatus.PENDING
+
+
 def test_dispatcher_handles_empty_queue(tmp_path) -> None:
     dispatcher = Dispatcher(EventQueue(tmp_path / "events.sqlite3"))
 

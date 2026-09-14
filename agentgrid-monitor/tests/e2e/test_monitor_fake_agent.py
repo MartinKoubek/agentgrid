@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 import time
 import uuid
 
@@ -11,9 +12,35 @@ from agentgrid_agent.registry import FileAgentRegistry
 from agentgrid_monitor.models import EventType
 from agentgrid_monitor.monitor import Monitor
 from tmuxio import TmuxClient
+from tmuxio.errors import TmuxCommandError
 
 
 pytestmark = pytest.mark.e2e
+
+
+@pytest.fixture(autouse=True)
+def require_tmux_can_allocate_panes(tmp_path) -> None:
+    if shutil.which("tmux") is None:
+        pytest.skip("tmux is not installed")
+    socket_name = f"agentgrid-monitor-preflight-{uuid.uuid4().hex}"
+    tmux = TmuxClient(socket_name=socket_name)
+    manager = AgentManager(
+        tmux=tmux,
+        registry=FileAgentRegistry(tmp_path / "preflight-agents.sqlite3"),
+        adapters=default_adapters(tmux),
+    )
+    try:
+        agent = manager.start(adapter="fake", session="preflight")
+        manager.stop(agent.id)
+    except (TmuxCommandError, subprocess.TimeoutExpired) as exc:
+        if "Device not configured" in str(exc) or "timed out" in str(exc):
+            pytest.skip(f"tmux cannot allocate a test pane: {exc}")
+        raise
+    finally:
+        try:
+            tmux.kill_server()
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def wait_for_event(monitor: Monitor, event_type: EventType, timeout: float = 3.0):

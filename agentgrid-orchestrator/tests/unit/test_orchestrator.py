@@ -1,5 +1,5 @@
 from agentgrid_orchestrator import Orchestrator
-from agentgrid_orchestrator.runtime import enqueue_monitor_events, orchestrator_event_handler
+from agentgrid_orchestrator.runtime import enqueue_monitor_events, map_orchestrator_decision, orchestrator_event_handler
 from agentgrid_dispatcher import DispatchDecision
 from agentgrid_event_queue import EventQueue, EventStatus
 from agentgrid_monitor import Event, EventType
@@ -22,6 +22,26 @@ class FakePolicy:
         return "ALLOW"
 
 
+class FakeProject:
+    def __init__(self) -> None:
+        self.touched = False
+
+    def touch(self) -> None:
+        self.touched = True
+
+
+class FakeProjectManager:
+    def __init__(self) -> None:
+        self.project = FakeProject()
+        self.saved = []
+
+    def get_project(self, project_id):
+        return self.project
+
+    def save(self, project):
+        self.saved.append(project)
+
+
 def test_orchestrator_delegates_routing_and_policy() -> None:
     decision = Orchestrator(router=FakeRouter(), policy_engine=FakePolicy()).handle_request("fix bug", "demo")
     assert decision.action == "START_AGENT"
@@ -30,8 +50,54 @@ def test_orchestrator_delegates_routing_and_policy() -> None:
 
 def test_orchestrator_accepts_event() -> None:
     decision = Orchestrator().handle_event({"type": "AGENT_EXITED", "agent_id": "ag-001"})
-    assert decision.action == "EVENT_RECEIVED"
+    assert decision.action == "AGENT_EXITED"
     assert decision.agent_id == "ag-001"
+
+
+def test_orchestrator_acknowledges_core_runtime_events() -> None:
+    orchestrator = Orchestrator()
+
+    assert orchestrator.handle_event({"type": "AGENT_STARTED", "agent_id": "ag-001"}).action == "AGENT_STARTED"
+    assert orchestrator.handle_event({"type": "AGENT_OUTPUT_CHANGED", "agent_id": "ag-001"}).action == "AGENT_OUTPUT_CHANGED"
+    assert orchestrator.handle_event({"type": "PROCESS_EXITED", "agent_id": "ag-001"}).action == "PROCESS_EXITED"
+
+
+def test_orchestrator_returns_failure_decision() -> None:
+    decision = Orchestrator().handle_event({"type": "AGENT_FAILED", "agent_id": "ag-001", "error": "boom"})
+
+    assert decision.action == "AGENT_FAILED"
+    assert decision.details["error"] == "boom"
+
+
+def test_orchestrator_reads_nested_failure_error() -> None:
+    decision = Orchestrator().handle_event({"type": "AGENT_FAILED", "agent_id": "ag-001", "details": {"error": "boom"}})
+
+    assert decision.action == "AGENT_FAILED"
+    assert decision.details["error"] == "boom"
+
+
+def test_orchestrator_waiting_input_asks_user() -> None:
+    decision = Orchestrator().handle_event({"type": "AGENT_WAITING_INPUT", "agent_id": "ag-001"})
+
+    assert decision.action == "ASK_USER"
+
+
+def test_orchestrator_unknown_event_is_received() -> None:
+    decision = Orchestrator().handle_event({"type": "SOMETHING_ELSE", "agent_id": "ag-001"})
+
+    assert decision.action == "EVENT_RECEIVED"
+
+
+def test_orchestrator_event_updates_project_activity() -> None:
+    project_manager = FakeProjectManager()
+
+    decision = Orchestrator(project_manager=project_manager).handle_event(
+        {"type": "AGENT_STARTED", "project_id": "demo", "agent_id": "ag-001"}
+    )
+
+    assert decision.action == "AGENT_STARTED"
+    assert project_manager.project.touched is True
+    assert project_manager.saved == [project_manager.project]
 
 
 def test_monitor_events_enqueue_with_dedupe(tmp_path) -> None:
@@ -55,3 +121,14 @@ def test_orchestrator_event_handler_maps_decisions(tmp_path) -> None:
     event = queue.enqueue("WAITING_USER")
 
     assert orchestrator_event_handler(WaitingOrchestrator())(event) == DispatchDecision.PARK
+
+
+def test_orchestrator_decision_mapping_is_explicit() -> None:
+    assert map_orchestrator_decision(type("Decision", (), {"action": "AGENT_STARTED"})()) == DispatchDecision.ACK
+    assert map_orchestrator_decision(type("Decision", (), {"action": "AGENT_FAILED"})()) == DispatchDecision.ACK
+    assert map_orchestrator_decision(type("Decision", (), {"action": "ASK_USER"})()) == DispatchDecision.PARK
+    assert map_orchestrator_decision(type("Decision", (), {"action": "WAITING_USER"})()) == DispatchDecision.PARK
+    assert map_orchestrator_decision(type("Decision", (), {"action": "AGENT_WAITING_INPUT"})()) == DispatchDecision.PARK
+    assert map_orchestrator_decision(type("Decision", (), {"action": "TEMPORARY_FAILURE"})()) == DispatchDecision.REQUEUE
+    assert map_orchestrator_decision(type("Decision", (), {"action": "RETRY"})()) == DispatchDecision.REQUEUE
+    assert map_orchestrator_decision(type("Decision", (), {"action": "REQUEUE"})()) == DispatchDecision.REQUEUE

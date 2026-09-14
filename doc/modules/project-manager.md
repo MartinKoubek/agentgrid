@@ -10,7 +10,9 @@ Owns project identity and project/workspace metadata.
 - repository/path
 - current branch
 - tmux workspace mapping
-- active agents
+- agents that belong to or were created for a project
+
+Agent runtime liveness is owned by Agent Manager, not Project Manager. `Project.agents` is project membership and history, not a list of running workers.
 - last activity
 - project configuration
 

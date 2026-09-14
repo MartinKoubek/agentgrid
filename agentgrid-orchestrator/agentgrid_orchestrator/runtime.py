@@ -90,7 +90,7 @@ class AgentGridRuntime:
         if agent_id is None:
             return None
         for project in self.project_manager.list_projects(include_closed=True):
-            if agent_id in project.active_agents:
+            if agent_id in project.agents:
                 return project.id
         return None
 
@@ -132,10 +132,14 @@ def monitor_event_dedupe_key(event: Event) -> str:
 def orchestrator_event_handler(orchestrator: Orchestrator):
     def handle(event: EventRecord) -> DispatchDecision:
         decision = orchestrator.handle_event({"id": event.id, "type": event.type, **event.payload})
-        if decision.action in {"ASK_USER", "WAITING_USER"}:
-            return DispatchDecision.PARK
-        if decision.action in {"REQUEUE", "TEMPORARY_FAILURE"}:
-            return DispatchDecision.REQUEUE
-        return DispatchDecision.ACK
+        return map_orchestrator_decision(decision)
 
     return handle
+
+
+def map_orchestrator_decision(decision) -> DispatchDecision:
+    if decision.action in {"ASK_USER", "WAITING_USER", "AGENT_WAITING_INPUT"}:
+        return DispatchDecision.PARK
+    if decision.action in {"REQUEUE", "RETRY", "TEMPORARY_FAILURE"}:
+        return DispatchDecision.REQUEUE
+    return DispatchDecision.ACK

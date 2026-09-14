@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+
+modules=(
+  agentgrid-tmux
+  agentgrid-agent
+  agentgrid-monitor
+  agentgrid-shell-logger
+  agentgrid-event-queue
+  agentgrid-dispatcher
+  agentgrid-project-manager
+  agentgrid-persistence
+  agentgrid-project-memory
+  agentgrid-project-context
+  agentgrid-context-router
+  agentgrid-policy
+  agentgrid-orchestrator
+  agentgrid-execution
+  agentgrid-recovery
+  agentgrid-observability
+  agentgrid-connectors
+  agentgrid-cross-context
+)
+
+module_path=".:../agentgrid-agent:../agentgrid-tmux:../agentgrid-event-queue:../agentgrid-dispatcher:../agentgrid-monitor:../agentgrid-project-manager:../agentgrid-project-memory:../agentgrid-project-context:../agentgrid-context-router:../agentgrid-policy"
+
+for module in "${modules[@]}"; do
+  echo "--- $module"
+  (cd "$repo_root/$module" && PYTHONPATH="$module_path${PYTHONPATH:+:$PYTHONPATH}" "${PYTHON:-python3.11}" -m pytest -q)
+done

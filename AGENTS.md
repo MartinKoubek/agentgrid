@@ -115,7 +115,7 @@ agentgrid/
 Suggested responsibilities:
 
 - `orchestrator/`: Owns main decision-making. Receives user requests and system events, chooses what happens next, and delegates work to project agents. It should not directly manipulate tmux or provider-specific agents.
-- `projects/`: Tracks projects and workspaces, including paths, repositories, current state, active agents, and related metadata. Opens, restores, and closes projects.
+- `projects/`: Tracks projects and workspaces, including paths, repositories, current state, historical agent membership, and related metadata. Opens, restores, and closes projects.
 - `workspace/`: Manages terminal workspaces. For V1 this primarily means tmux sessions, windows, and panes. Keep tmux-specific behavior behind a workspace adapter.
 - `agents/`: Manages worker agents and agent adapters. Starts, stops, restarts, and tracks agents, including agent ID, project, task, state, pane, and lifecycle information.
 - `events/`: Contains event collection, queueing, and dispatch. Normalize observations into events, persist and deduplicate pending events, and deliver them to the orchestrator without flooding it.
@@ -210,20 +210,20 @@ Do not describe `agentgrid-orchestrator` as a working Codex Master yet. It is cu
 
 ## Validation Workflow
 
-Run focused tests inside the module being changed first. For broader validation from the repository root, use the module loop below and keep dependency paths explicit until packaging is unified:
+Run focused tests inside the module being changed first. For full repository validation from the repository root, run:
 
 ```sh
-for d in agentgrid-tmux agentgrid-agent agentgrid-monitor agentgrid-shell-logger agentgrid-event-queue agentgrid-dispatcher agentgrid-project-manager agentgrid-persistence agentgrid-project-memory agentgrid-project-context agentgrid-context-router agentgrid-policy agentgrid-orchestrator agentgrid-execution agentgrid-recovery agentgrid-observability agentgrid-connectors agentgrid-cross-context; do
-  echo "--- $d"
-  (cd "$d" && PYTHONPATH=.:../agentgrid-agent:../agentgrid-tmux:../agentgrid-event-queue:../agentgrid-dispatcher:../agentgrid-monitor:../agentgrid-project-manager:../agentgrid-project-memory:../agentgrid-project-context:../agentgrid-context-router:../agentgrid-policy python3.11 -m pytest -q) || exit 1
-done
+./bin/test-all
 ```
+
+This is the same command used by GitHub Actions and includes unit tests plus tmux E2E and orchestrator vertical-slice E2E tests.
 
 For changes involving tmux behavior, prefer isolated tmux sockets such as `tmux -L agentgrid-demo` and clean them up after the test.
 
 ## Durable Lessons
 
 - Do not confuse pane liveness with agent liveness. A pane can remain alive after the controlled worker process exits.
+- Do not confuse project agent membership with agent liveness. `Project.agents` is history and ownership; Agent Manager is the runtime source of truth.
 - Prefer stable tmux pane IDs such as `%17` for cross-module references because session, window, and pane indices can move.
 - Do not actively handshake arbitrary human shells. Only AgentGrid-created controlled endpoints should receive active application handshakes.
 - Keep adapter registration pluggable. Add future Codex, Claude, or fake adapters through injected maps or registries, not hard-coded manager branches.

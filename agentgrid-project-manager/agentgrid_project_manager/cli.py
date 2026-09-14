@@ -21,6 +21,9 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("project_id")
     close = sub.add_parser("close", parents=[common])
     close.add_argument("project_id")
+    add_agent = sub.add_parser("add-agent", parents=[common])
+    add_agent.add_argument("project_id")
+    add_agent.add_argument("agent_id")
     sub.add_parser("last", parents=[common])
     return parser
 
@@ -49,6 +52,8 @@ def run(manager: ProjectManager, args: argparse.Namespace) -> object:
         return manager.get_project(args.project_id)
     if args.command == "close":
         return manager.close_project(args.project_id)
+    if args.command == "add-agent":
+        return manager.add_agent(args.project_id, args.agent_id)
     if args.command == "last":
         return manager.get_last_active_project()
     raise ValueError(args.command)

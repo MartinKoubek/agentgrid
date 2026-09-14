@@ -50,6 +50,12 @@ class ProjectManager:
         self.save(project)
         return project
 
+    def add_agent(self, project_id: str, agent_id: str) -> Project:
+        project = self.get_project(project_id)
+        project.add_agent(agent_id)
+        self.save(project)
+        return project
+
     def get_last_active_project(self) -> Project | None:
         projects = self.list_projects()
         return projects[0] if projects else None
