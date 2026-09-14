@@ -8,17 +8,19 @@ version = "0.1.0"
 description = "agentgrid-agent: standalone interactive agent runtime manager backed by agentgrid-tmux."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["agentgrid-tmux>=0.1.0"]
 
 [project.scripts]
 agentgrid-agent = "agentgrid_agent.cli:main"
+
+[tool.uv.sources]
+agentgrid-tmux = { path = "../agentgrid-tmux", editable = true }
 
 [tool.setuptools]
 packages = ["agentgrid_agent", "agentgrid_agent.adapters"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "../agentgrid-tmux"]
 markers = [
   "e2e: tests that require a local tmux binary and isolated tmux server",
 ]

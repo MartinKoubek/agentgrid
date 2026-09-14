@@ -11,8 +11,10 @@ It knows nothing about AI agents, providers, memory, orchestration, or event rou
 - Perform non-invasive handshakes by default.
 - Optionally perform active handshakes only for controlled AgentGrid-created endpoints.
 - Store controlled endpoint IDs in tmux pane option `@agentgrid_endpoint_id`, with process environment lookup as a best-effort fallback where supported.
+- Track controlled runtime process IDs separately from pane IDs through `@agentgrid_runtime_pid`.
 - Read snapshots through `capture-pane`.
 - Follow new output through `pipe-pane`.
+- Stop output streaming with `stop-follow`.
 - Distinguish text input from key input.
 
 ## CLI
@@ -56,6 +58,7 @@ agentgrid-tmux read %17 --lines 50
 agentgrid-tmux write %17 "echo hello"
 agentgrid-tmux key %17 ENTER
 agentgrid-tmux follow %17
+agentgrid-tmux stop-follow %17
 ```
 
 Use `--socket-name` or `--socket-path` to target an isolated tmux server during tests or automation.
@@ -103,6 +106,21 @@ bin/tmuxio key %17 ENTER
 bin/tmuxio key %17 Escape
 ```
 
+Start and stop continuous output streaming:
+
+```sh
+bin/tmuxio follow %17 --output /tmp/pane.log
+bin/tmuxio stop-follow %17
+```
+
+Active handshakes report pane liveness separately from controlled worker liveness:
+
+```sh
+bin/tmuxio handshake %17 --active --endpoint-id abc123 --json
+```
+
+The JSON response includes `pane_alive`, `agent_alive`, `runtime_pid`, `endpoint_id`, and `matched_endpoint_id`.
+
 Use an isolated tmux server:
 
 ```sh
@@ -128,6 +146,9 @@ pane.write("ls -la")
 pane.send_key("ENTER")
 pane.is_alive()
 pane.info()
+
+tmux.follow("%17", output_path="/tmp/pane.log")
+tmux.stop_follow("%17")
 ```
 
 ## Architectural Rule

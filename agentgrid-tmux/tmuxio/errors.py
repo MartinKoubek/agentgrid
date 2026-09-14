@@ -24,3 +24,7 @@ class PaneNotFoundError(TmuxError):
     def __init__(self, pane_id: str) -> None:
         self.pane_id = pane_id
         super().__init__(f"tmux pane not found: {pane_id}")
+
+
+class UnsafePaneError(TmuxError):
+    """Raised when launching into an existing pane would be unsafe."""

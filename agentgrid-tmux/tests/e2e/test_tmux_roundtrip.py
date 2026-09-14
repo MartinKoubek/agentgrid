@@ -4,10 +4,12 @@ import shutil
 import subprocess
 import time
 import uuid
+from pathlib import Path
 
 import pytest
 
 from tmuxio import TmuxClient
+from tmuxio.errors import UnsafePaneError
 
 
 pytestmark = pytest.mark.e2e
@@ -52,7 +54,12 @@ def test_tmux_discover_handshake_write_read_and_exit() -> None:
         active_result = client.handshake(pane_id, active=True, expected_endpoint_id="abc123")
         assert active_result.reachable is True
         assert active_result.active_handshake is True
+        assert active_result.pane_alive is True
+        assert active_result.agent_alive is True
         assert active_result.matched_endpoint_id is True
+
+        mismatch_result = client.handshake(pane_id, active=True, expected_endpoint_id="wrong")
+        assert mismatch_result.matched_endpoint_id is False
 
         client.write(pane_id, "echo AGENTGRID_TEST")
         assert "AGENTGRID_TEST" in wait_for_text(client, pane_id, "AGENTGRID_TEST")
@@ -71,6 +78,83 @@ def test_tmux_discover_handshake_write_read_and_exit() -> None:
         assert client.handshake(pane_id).reachable is False
     finally:
         subprocess.run(["tmux", "-L", socket_name, "kill-server"], check=False)
+
+
+def test_tmux_existing_pane_launch_tracks_worker_separately_from_shell() -> None:
+    if shutil.which("tmux") is None:
+        pytest.skip("tmux is not installed")
+
+    socket_name = f"agentgrid-test-{uuid.uuid4().hex}"
+    client = TmuxClient(socket_name=socket_name)
+
+    try:
+        shell_pane = client.start_process("bash", session="existing-shell")
+        client.start_process_in_pane(
+            shell_pane.pane_id,
+            "python3.11 -c 'print(\"WORKER_DONE\", flush=True)'",
+            endpoint_id="worker-1",
+        )
+        wait_for_text(client, shell_pane.pane_id, "WORKER_DONE")
+
+        deadline = time.monotonic() + 3.0
+        last_result = client.handshake(shell_pane.pane_id, active=True, expected_endpoint_id="worker-1")
+        while time.monotonic() < deadline:
+            last_result = client.handshake(shell_pane.pane_id, active=True, expected_endpoint_id="worker-1")
+            if last_result.pane_alive and not last_result.agent_alive:
+                break
+            time.sleep(0.05)
+
+        assert last_result.pane_alive is True
+        assert last_result.agent_alive is False
+        assert last_result.matched_endpoint_id is False
+    finally:
+        client.kill_server()
+
+
+def test_tmux_refuses_to_launch_in_non_shell_pane() -> None:
+    if shutil.which("tmux") is None:
+        pytest.skip("tmux is not installed")
+
+    socket_name = f"agentgrid-test-{uuid.uuid4().hex}"
+    client = TmuxClient(socket_name=socket_name)
+
+    try:
+        pane = client.start_process("python3.11 -c 'import time; time.sleep(5)'", session="busy-pane")
+        with pytest.raises(UnsafePaneError):
+            client.start_process_in_pane(pane.pane_id, "echo unsafe", endpoint_id="unsafe")
+    finally:
+        client.kill_server()
+
+
+def test_tmux_follow_can_be_started_and_stopped(tmp_path) -> None:
+    if shutil.which("tmux") is None:
+        pytest.skip("tmux is not installed")
+
+    socket_name = f"agentgrid-test-{uuid.uuid4().hex}"
+    client = TmuxClient(socket_name=socket_name)
+    output_path = tmp_path / "follow.log"
+
+    try:
+        pane = client.start_process("bash", session="streaming")
+        returned_path = client.follow(pane.pane_id, output_path=str(output_path))
+        assert returned_path == str(output_path)
+
+        client.write(pane.pane_id, "echo STREAM_ON")
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            if output_path.exists() and "STREAM_ON" in output_path.read_text(encoding="utf-8"):
+                break
+            time.sleep(0.05)
+        assert "STREAM_ON" in output_path.read_text(encoding="utf-8")
+
+        client.stop_follow(pane.pane_id)
+        before = output_path.read_text(encoding="utf-8")
+        client.write(pane.pane_id, "echo STREAM_OFF")
+        time.sleep(0.3)
+        after = output_path.read_text(encoding="utf-8")
+        assert after == before
+    finally:
+        client.kill_server()
 
 
 def test_tmux_interactive_prompt_roundtrip() -> None:

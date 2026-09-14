@@ -43,3 +43,6 @@ class PaneEndpoint:
 
     def follow(self, output_path: str | None = None) -> str:
         return self.client.follow(self.pane_id, output_path=output_path)
+
+    def stop_follow(self) -> None:
+        self.client.stop_follow(self.pane_id)

@@ -33,8 +33,9 @@ class FakeAgentAdapter(AgentAdapter):
         return self.tmux.read(agent.pane_id)
 
     def is_alive(self, agent: Agent) -> bool:
-        result = self.tmux.handshake(agent.pane_id)
-        return result.reachable and result.dead is False
+        result = self.tmux.handshake(agent.pane_id, active=True, expected_endpoint_id=agent.endpoint_id)
+        runtime_matches = agent.runtime_pid is not None and result.runtime_pid == agent.runtime_pid
+        return result.pane_alive is True and result.agent_alive is True and result.matched_endpoint_id is True and runtime_matches
 
     def stop(self, agent: Agent) -> None:
         if self.is_alive(agent):

@@ -6,6 +6,7 @@ import sys
 
 from tmuxio import TmuxClient
 
+from agentgrid_agent.adapters import default_adapters
 from agentgrid_agent.manager import AgentManager
 from agentgrid_agent.registry import FileAgentRegistry
 
@@ -58,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     tmux = TmuxClient(executable=args.tmux, socket_name=args.socket_name, socket_path=args.socket_path)
-    manager = AgentManager(tmux=tmux, registry=FileAgentRegistry(args.registry))
+    manager = AgentManager(tmux=tmux, registry=FileAgentRegistry(args.registry), adapters=default_adapters(tmux))
 
     try:
         output = run_command(manager, args)

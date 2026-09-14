@@ -6,7 +6,6 @@ from time import monotonic, sleep
 from tmuxio import TmuxClient
 
 from agentgrid_agent.adapters.base import AgentAdapter
-from agentgrid_agent.adapters.fake import FakeAgentAdapter
 from agentgrid_agent.models import Agent, AgentConfig, AgentState
 from agentgrid_agent.registry import FileAgentRegistry
 
@@ -16,9 +15,14 @@ class AgentManager:
         self,
         tmux: TmuxClient | None = None,
         registry: FileAgentRegistry | None = None,
+        adapters: dict[str, AgentAdapter] | None = None,
     ) -> None:
         self.tmux = tmux or TmuxClient()
         self.registry = registry or FileAgentRegistry()
+        self.adapters = dict(adapters or {})
+
+    def register_adapter(self, name: str, adapter: AgentAdapter) -> None:
+        self.adapters[name] = adapter
 
     def list(self) -> list[Agent]:
         agents = self.registry.list()
@@ -36,7 +40,7 @@ class AgentManager:
         cwd: str | None = None,
     ) -> Agent:
         return self._start(
-            agent_id=self.registry.next_id(),
+            agent_id=self.registry.allocate_id(),
             adapter=adapter,
             command=command,
             pane_id=pane_id,
@@ -71,12 +75,14 @@ class AgentManager:
                 endpoint_id=endpoint_id,
             )
 
+        handshake = self.tmux.handshake(pane.pane_id, active=True, expected_endpoint_id=endpoint_id)
         agent = Agent(
             id=agent_id,
             adapter=config.adapter,
             pane_id=pane.pane_id,
             pid=pane.pid,
             state=AgentState.STARTING,
+            runtime_pid=handshake.runtime_pid,
             command=launch_command,
             endpoint_id=endpoint_id,
             session=pane.session,
@@ -139,12 +145,17 @@ class AgentManager:
         )
 
     def _adapter(self, name: str) -> AgentAdapter:
-        if name == "fake":
-            return FakeAgentAdapter(self.tmux)
-        raise ValueError(f"unknown agent adapter: {name}")
+        try:
+            return self.adapters[name]
+        except KeyError as exc:
+            raise ValueError(f"unknown agent adapter: {name}") from exc
 
     def _refresh_state(self, agent: Agent) -> None:
         try:
+            handshake = self.tmux.handshake(agent.pane_id, active=True, expected_endpoint_id=agent.endpoint_id)
+            agent.pid = handshake.pid
+            if agent.runtime_pid is None:
+                agent.runtime_pid = handshake.runtime_pid
             alive = self._adapter(agent.adapter).is_alive(agent)
             if alive and agent.state != AgentState.FAILED:
                 agent.mark(AgentState.RUNNING)

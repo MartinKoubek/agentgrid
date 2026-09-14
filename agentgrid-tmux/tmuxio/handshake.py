@@ -15,20 +15,28 @@ def handshake(
     try:
         pane = client.inspect_pane(pane_id)
     except TmuxError as exc:
-        return HandshakeResult(reachable=False, pane_id=pane_id, error=str(exc))
+        return HandshakeResult(reachable=False, pane_id=pane_id, pane_alive=False, agent_alive=False, error=str(exc))
+
+    runtime_pid = _parse_pid(client.get_pane_option(pane_id, "@agentgrid_runtime_pid")) or pane.pid
+    endpoint_id = client.get_pane_option(pane_id, "@agentgrid_endpoint_id") or None
+    agent_alive = _process_exists(runtime_pid) if runtime_pid else False
 
     result = HandshakeResult(
         reachable=True,
         pane_id=pane.pane_id,
+        pane_alive=True,
+        agent_alive=agent_alive,
         session=pane.session,
         window=pane.window,
         pid=pane.pid,
+        runtime_pid=runtime_pid,
         command=pane.command,
         tty=pane.tty,
         active=pane.active,
         dead=pane.dead,
         active_handshake=active,
         expected_endpoint_id=expected_endpoint_id,
+        endpoint_id=endpoint_id,
     )
 
     if not active:
@@ -39,16 +47,33 @@ def handshake(
             **{**result.to_dict(), "matched_endpoint_id": None, "error": "active handshake requires expected_endpoint_id"}
         )
 
-    env_value = client.get_pane_option(pane_id, "@agentgrid_endpoint_id") or _read_process_environment(pane.pid).get(
-        "AGENTGRID_ENDPOINT_ID"
-    ) if pane.pid else None
+    env_value = endpoint_id or (_read_process_environment(runtime_pid).get("AGENTGRID_ENDPOINT_ID") if runtime_pid else None)
     return HandshakeResult(
         **{
             **result.to_dict(),
-            "matched_endpoint_id": env_value == expected_endpoint_id,
-            "error": None if env_value == expected_endpoint_id else "AGENTGRID_ENDPOINT_ID did not match",
+            "matched_endpoint_id": agent_alive and env_value == expected_endpoint_id,
+            "error": None
+            if agent_alive and env_value == expected_endpoint_id
+            else "worker process is not alive or AGENTGRID_ENDPOINT_ID did not match",
         }
     )
+
+
+def _parse_pid(value: str) -> int | None:
+    try:
+        return int(value) if value else None
+    except ValueError:
+        return None
+
+
+def _process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
 
 
 def _read_process_environment(pid: int) -> dict[str, str]:

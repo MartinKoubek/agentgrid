@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from time import time
@@ -32,6 +33,7 @@ class Agent:
     pane_id: str
     pid: int | None
     state: AgentState
+    runtime_pid: int | None = None
     command: str | None = None
     endpoint_id: str | None = None
     session: str | None = None
@@ -51,8 +53,16 @@ class Agent:
         data["state"] = self.state.value
         return data
 
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), sort_keys=True)
+
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> Agent:
         values = dict(data)
         values["state"] = AgentState(str(values["state"]))
+        values.setdefault("runtime_pid", None)
         return cls(**values)
+
+    @classmethod
+    def from_json(cls, data: str) -> Agent:
+        return cls.from_dict(json.loads(data))

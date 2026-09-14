@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from tmuxio.models import HandshakeResult, Pane
 
+from agentgrid_agent.adapters.fake import FakeAgentAdapter
 from agentgrid_agent.manager import AgentManager
 from agentgrid_agent.models import AgentState
 from agentgrid_agent.registry import FileAgentRegistry
@@ -11,14 +12,18 @@ class FakeTmux:
     def __init__(self) -> None:
         self.output = ""
         self.alive = True
+        self.endpoint_id: str | None = None
+        self.runtime_pid = 456
         self.writes: list[tuple[str, str]] = []
 
     def start_process(self, command, session="agentgrid", window=None, cwd=None, endpoint_id=None):
         self.output = "FAKE_AGENT_READY\n"
+        self.endpoint_id = endpoint_id
         return self._pane(command, session, window)
 
-    def start_process_in_pane(self, pane_id, command, endpoint_id=None):
+    def start_process_in_pane(self, pane_id, command, endpoint_id=None, require_idle_shell=True):
         self.output = "FAKE_AGENT_READY\n"
+        self.endpoint_id = endpoint_id
         return self._pane(command, "existing", "existing")
 
     def get_pane(self, pane_id):
@@ -35,8 +40,18 @@ class FakeTmux:
     def read(self, pane_id):
         return self.output
 
-    def handshake(self, pane_id):
-        return HandshakeResult(reachable=True, pane_id=pane_id, dead=not self.alive)
+    def handshake(self, pane_id, active=False, expected_endpoint_id=None):
+        return HandshakeResult(
+            reachable=True,
+            pane_id=pane_id,
+            pane_alive=True,
+            agent_alive=self.alive,
+            runtime_pid=self.runtime_pid,
+            endpoint_id=self.endpoint_id,
+            expected_endpoint_id=expected_endpoint_id,
+            matched_endpoint_id=self.alive and self.endpoint_id == expected_endpoint_id,
+            dead=False,
+        )
 
     def _pane(self, command, session, window):
         return Pane(
@@ -57,7 +72,12 @@ class FakeTmux:
 
 
 def test_manager_starts_sends_reads_and_stops_agent(tmp_path) -> None:
-    manager = AgentManager(tmux=FakeTmux(), registry=FileAgentRegistry(tmp_path / "agents.json"))
+    tmux = FakeTmux()
+    manager = AgentManager(
+        tmux=tmux,
+        registry=FileAgentRegistry(tmp_path / "agents.sqlite3"),
+        adapters={"fake": FakeAgentAdapter(tmux)},
+    )
 
     agent = manager.start(adapter="fake")
     assert agent.id == "ag-001"
@@ -72,7 +92,11 @@ def test_manager_starts_sends_reads_and_stops_agent(tmp_path) -> None:
 
 def test_manager_restarts_with_same_agent_id(tmp_path) -> None:
     tmux = FakeTmux()
-    manager = AgentManager(tmux=tmux, registry=FileAgentRegistry(tmp_path / "agents.json"))
+    manager = AgentManager(
+        tmux=tmux,
+        registry=FileAgentRegistry(tmp_path / "agents.sqlite3"),
+        adapters={"fake": FakeAgentAdapter(tmux)},
+    )
     agent = manager.start(adapter="fake")
 
     restarted = manager.restart(agent.id)
@@ -80,3 +104,30 @@ def test_manager_restarts_with_same_agent_id(tmp_path) -> None:
     assert restarted.id == agent.id
     assert restarted.state == AgentState.RUNNING
     assert [saved.id for saved in manager.list()] == ["ag-001"]
+
+
+def test_manager_uses_registered_adapter_map(tmp_path) -> None:
+    tmux = FakeTmux()
+    adapter = FakeAgentAdapter(tmux)
+    manager = AgentManager(tmux=tmux, registry=FileAgentRegistry(tmp_path / "agents.sqlite3"), adapters={})
+
+    manager.register_adapter("fake", adapter)
+    agent = manager.start(adapter="fake")
+
+    assert agent.adapter == "fake"
+    assert agent.state == AgentState.RUNNING
+
+
+def test_manager_detects_runtime_pid_mismatch(tmp_path) -> None:
+    tmux = FakeTmux()
+    manager = AgentManager(
+        tmux=tmux,
+        registry=FileAgentRegistry(tmp_path / "agents.sqlite3"),
+        adapters={"fake": FakeAgentAdapter(tmux)},
+    )
+    agent = manager.start(adapter="fake")
+
+    tmux.runtime_pid = 999
+
+    assert manager.is_alive(agent.id) is False
+    assert manager.inspect(agent.id).state == AgentState.STOPPED

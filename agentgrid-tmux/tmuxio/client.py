@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import asdict, is_dataclass
+from shlex import quote
+from time import monotonic, sleep
 from typing import Iterable
 
 from tmuxio.discovery import parse_pane, parse_session, parse_window
 from tmuxio.endpoint import PaneEndpoint
-from tmuxio.errors import PaneNotFoundError, TmuxCommandError, TmuxNotFoundError
+from tmuxio.errors import PaneNotFoundError, TmuxCommandError, TmuxNotFoundError, UnsafePaneError
 from tmuxio.handshake import handshake
 from tmuxio.models import HandshakeResult, Pane, Session, TmuxCommandResult, Window
 from tmuxio.reader import read_pane
@@ -161,18 +163,53 @@ class TmuxClient:
                 args.extend(["-n", window])
         if cwd:
             args.extend(["-c", cwd])
-        args.append(command)
+        launch_command = self._runtime_wrapper(command, endpoint_id) if endpoint_id else command
+        args.append(launch_command)
         result = self.run(args)
         pane_id = result.stdout.strip()
         if endpoint_id:
-            self.set_pane_option(pane_id, "@agentgrid_endpoint_id", endpoint_id)
+            self.wait_for_pane_option(pane_id, "@agentgrid_runtime_pid")
         return self.inspect_pane(pane_id)
 
-    def start_process_in_pane(self, pane_id: str, command: str, endpoint_id: str | None = None) -> Pane:
+    def start_process_in_pane(
+        self,
+        pane_id: str,
+        command: str,
+        endpoint_id: str | None = None,
+        require_idle_shell: bool = True,
+    ) -> Pane:
+        pane = self.inspect_pane(pane_id)
+        if require_idle_shell and not self.is_idle_shell(pane):
+            raise UnsafePaneError(
+                f"refusing to start process in pane {pane_id}: current command is {pane.command!r}, not an idle shell"
+            )
+        runtime_command = self._runtime_wrapper(command, endpoint_id) if endpoint_id else command
+        self.write(pane_id, runtime_command)
         if endpoint_id:
-            self.set_pane_option(pane_id, "@agentgrid_endpoint_id", endpoint_id)
-        self.write(pane_id, command)
+            self.wait_for_pane_option(pane_id, "@agentgrid_runtime_pid")
         return self.inspect_pane(pane_id)
+
+    def is_idle_shell(self, pane: Pane) -> bool:
+        return not pane.dead and pane.command in {"bash", "zsh", "sh", "fish"}
+
+    def wait_for_pane_option(self, pane_id: str, name: str, timeout: float = 3.0) -> str:
+        deadline = monotonic() + timeout
+        while monotonic() < deadline:
+            value = self.get_pane_option(pane_id, name)
+            if value:
+                return value
+            sleep(0.05)
+        return ""
+
+    def _runtime_wrapper(self, command: str, endpoint_id: str | None) -> str:
+        option_commands = ["tmux set-option -p -t \"$TMUX_PANE\" @agentgrid_runtime_pid \"$$\""]
+        if endpoint_id:
+            option_commands.append(
+                "tmux set-option -p -t \"$TMUX_PANE\" @agentgrid_endpoint_id " + quote(endpoint_id)
+            )
+        script = "; ".join([*option_commands, "exec " + command])
+        env_prefix = f"AGENTGRID_ENDPOINT_ID={quote(endpoint_id)} " if endpoint_id else ""
+        return f"{env_prefix}sh -c {quote(script)}"
 
     def _session_exists(self, session: str) -> bool:
         try:
@@ -219,6 +256,9 @@ class TmuxClient:
 
     def follow(self, pane_id: str, output_path: str | None = None) -> str:
         return follow_pane(self, pane_id, output_path=output_path)
+
+    def stop_follow(self, pane_id: str) -> None:
+        self.run(["pipe-pane", "-t", pane_id])
 
 
 def to_jsonable(value: object) -> object:

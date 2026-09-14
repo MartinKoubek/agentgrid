@@ -52,6 +52,9 @@ def build_parser() -> argparse.ArgumentParser:
     follow.add_argument("pane_id")
     follow.add_argument("--output", help="append output to this file instead of a temporary file")
 
+    stop_follow = subparsers.add_parser("stop-follow", parents=[common], help="stop streaming pane output")
+    stop_follow.add_argument("pane_id")
+
     return parser
 
 
@@ -98,6 +101,9 @@ def run_command(client: TmuxClient, args: argparse.Namespace) -> object:
     if args.command == "follow":
         output_path = client.follow(args.pane_id, output_path=args.output)
         return {"ok": True, "output": output_path}
+    if args.command == "stop-follow":
+        client.stop_follow(args.pane_id)
+        return {"ok": True}
     raise ValueError(f"unknown command: {args.command}")
 
 

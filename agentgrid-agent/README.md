@@ -9,11 +9,13 @@ It turns a generic tmux pane managed by `agentgrid-tmux` into an AgentGrid agent
 - Start an agent in a new pane or an existing pane.
 - Assign stable IDs such as `ag-001`.
 - Persist the mapping from `agent_id` to tmux `pane_id`.
+- Track `runtime_pid` separately from the tmux pane so an agent can stop while an existing shell pane stays alive.
 - Send input through `agentgrid-tmux`.
 - Read output through `agentgrid-tmux`.
 - Track lifecycle states: `STARTING`, `RUNNING`, `STOPPED`, and `FAILED`.
 - Expose `is_alive()`, `stop()`, `restart()`, and `inspect()`.
 - Keep provider-specific behavior behind `AgentAdapter` implementations.
+- Store agent registry state in SQLite for concurrent ID allocation and writes.
 
 ## Architecture Rule
 
@@ -67,10 +69,10 @@ Use an isolated tmux server and registry for tests or demos:
 
 ```sh
 tmux -L agentgrid-demo start-server
-./agentgrid-agent/bin/agentgrid-agent --socket-name agentgrid-demo --registry /tmp/agentgrid-agents.json start --adapter fake
-./agentgrid-agent/bin/agentgrid-agent --socket-name agentgrid-demo --registry /tmp/agentgrid-agents.json send ag-001 "hello"
-./agentgrid-agent/bin/agentgrid-agent --socket-name agentgrid-demo --registry /tmp/agentgrid-agents.json read ag-001
-./agentgrid-agent/bin/agentgrid-agent --socket-name agentgrid-demo --registry /tmp/agentgrid-agents.json stop ag-001
+./agentgrid-agent/bin/agentgrid-agent --socket-name agentgrid-demo --registry /tmp/agentgrid-agents.sqlite3 start --adapter fake
+./agentgrid-agent/bin/agentgrid-agent --socket-name agentgrid-demo --registry /tmp/agentgrid-agents.sqlite3 send ag-001 "hello"
+./agentgrid-agent/bin/agentgrid-agent --socket-name agentgrid-demo --registry /tmp/agentgrid-agents.sqlite3 read ag-001
+./agentgrid-agent/bin/agentgrid-agent --socket-name agentgrid-demo --registry /tmp/agentgrid-agents.sqlite3 stop ag-001
 tmux -L agentgrid-demo kill-server
 ```
 
@@ -80,13 +82,27 @@ Python package description: `agentgrid_agent` manages interactive runtime agents
 
 ```python
 from agentgrid_agent import AgentManager
+from agentgrid_agent.adapters import default_adapters
+from tmuxio import TmuxClient
 
-manager = AgentManager()
+tmux = TmuxClient()
+manager = AgentManager(tmux=tmux, adapters=default_adapters(tmux))
 agent = manager.start(adapter="fake")
 
 manager.send(agent.id, "hello")
 print(manager.read(agent.id))
 manager.stop(agent.id)
+```
+
+`AgentManager` accepts an injected adapter map. Keep provider adapters registered outside the manager:
+
+```python
+manager = AgentManager(
+    tmux=tmux,
+    adapters={
+        "fake": fake_adapter,
+    },
+)
 ```
 
 ## Adapter Interface
@@ -103,3 +119,13 @@ class AgentAdapter:
 ```
 
 The included `fake` adapter is deterministic and intended for local tests. It responds to input with `ACK: <input>` and exits when it receives `exit`.
+
+## Liveness
+
+Agent liveness is not the same as pane liveness:
+
+- `pane_id` identifies the tmux pane.
+- `runtime_pid` identifies the controlled worker process.
+- `endpoint_id` identifies the expected controlled endpoint.
+
+An agent is alive only when the pane exists, the runtime process exists, and the endpoint ID matches. If a worker exits inside an existing shell pane, the pane can remain alive while the agent state becomes `STOPPED`.

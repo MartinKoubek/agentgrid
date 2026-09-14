@@ -62,15 +62,19 @@ class Pane:
 class HandshakeResult:
     reachable: bool
     pane_id: str
+    pane_alive: bool | None = None
+    agent_alive: bool | None = None
     session: str | None = None
     window: str | None = None
     pid: int | None = None
+    runtime_pid: int | None = None
     command: str | None = None
     tty: str | None = None
     active: bool | None = None
     dead: bool | None = None
     active_handshake: bool = False
     expected_endpoint_id: str | None = None
+    endpoint_id: str | None = None
     matched_endpoint_id: bool | None = None
     error: str | None = None
 

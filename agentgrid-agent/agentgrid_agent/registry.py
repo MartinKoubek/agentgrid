@@ -1,55 +1,85 @@
 from __future__ import annotations
 
-import json
+import sqlite3
+import threading
 from pathlib import Path
 
 from agentgrid_agent.models import Agent
 
 
-class FileAgentRegistry:
+class SQLiteAgentRegistry:
+    _init_lock = threading.Lock()
+
     def __init__(self, path: str | Path | None = None) -> None:
-        self.path = Path(path).expanduser() if path else Path.home() / ".agentgrid" / "agents.json"
+        self.path = Path(path).expanduser() if path else Path.home() / ".agentgrid" / "agents.sqlite3"
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def allocate_id(self) -> str:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT next_value FROM agent_sequence WHERE name = 'agent'").fetchone()
+            next_value = int(row[0]) if row else 1
+            connection.execute(
+                "INSERT INTO agent_sequence(name, next_value) VALUES('agent', ?) "
+                "ON CONFLICT(name) DO UPDATE SET next_value = excluded.next_value",
+                (next_value + 1,),
+            )
+            return f"ag-{next_value:03d}"
 
     def list(self) -> list[Agent]:
-        return list(self._load().values())
+        with self._connect() as connection:
+            rows = connection.execute("SELECT data FROM agents ORDER BY id").fetchall()
+        return [Agent.from_json(row[0]) for row in rows]
 
     def get(self, agent_id: str) -> Agent:
-        agents = self._load()
-        if agent_id not in agents:
+        with self._connect() as connection:
+            row = connection.execute("SELECT data FROM agents WHERE id = ?", (agent_id,)).fetchone()
+        if row is None:
             raise KeyError(f"agent not found: {agent_id}")
-        return agents[agent_id]
+        return Agent.from_json(row[0])
 
     def save(self, agent: Agent) -> None:
-        agents = self._load()
-        agents[agent.id] = agent
-        self._save(agents)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "INSERT INTO agents(id, data) VALUES(?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET data = excluded.data",
+                (agent.id, agent.to_json()),
+            )
 
     def delete(self, agent_id: str) -> None:
-        agents = self._load()
-        agents.pop(agent_id, None)
-        self._save(agents)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("DELETE FROM agents WHERE id = ?", (agent_id,))
 
     def next_id(self) -> str:
-        highest = 0
-        for agent in self.list():
-            if not agent.id.startswith("ag-"):
-                continue
-            try:
-                highest = max(highest, int(agent.id[3:]))
-            except ValueError:
-                continue
-        return f"ag-{highest + 1:03d}"
+        return self.allocate_id()
 
-    def _load(self) -> dict[str, Agent]:
-        if not self.path.exists():
-            return {}
-        with self.path.open("r", encoding="utf-8") as registry_file:
-            raw = json.load(registry_file)
-        return {agent_id: Agent.from_dict(agent_data) for agent_id, agent_data in raw.get("agents", {}).items()}
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path, timeout=30.0)
+        connection.execute("PRAGMA busy_timeout = 30000")
+        return connection
 
-    def _save(self, agents: dict[str, Agent]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"agents": {agent_id: agent.to_dict() for agent_id, agent in agents.items()}}
-        with self.path.open("w", encoding="utf-8") as registry_file:
-            json.dump(payload, registry_file, indent=2, sort_keys=True)
-            registry_file.write("\n")
+    def _init_db(self) -> None:
+        with self._init_lock:
+            with self._connect() as connection:
+                connection.execute("PRAGMA journal_mode = WAL")
+                connection.execute(
+                    "CREATE TABLE IF NOT EXISTS agents ("
+                    "id TEXT PRIMARY KEY, "
+                    "data TEXT NOT NULL"
+                    ")"
+                )
+                connection.execute(
+                    "CREATE TABLE IF NOT EXISTS agent_sequence ("
+                    "name TEXT PRIMARY KEY, "
+                    "next_value INTEGER NOT NULL"
+                    ")"
+                )
+                connection.execute(
+                    "INSERT OR IGNORE INTO agent_sequence(name, next_value) VALUES('agent', 1)"
+                )
+
+
+FileAgentRegistry = SQLiteAgentRegistry

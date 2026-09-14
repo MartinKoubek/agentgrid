@@ -88,6 +88,14 @@ Agent runtime state should stay simple at this layer:
 
 Agent adapters should define provider-neutral operations such as `start`, `send`, `read`, `is_alive`, and `stop`. Do not add protocol interpretation here, such as deciding whether an agent is asking yes or no, whether a task is complete, or whether output changed. That belongs to the later monitor and event collector layer.
 
+Agent liveness must be separate from tmux pane liveness. Track the controlled worker runtime identity, such as `runtime_pid`, separately from `pane_id`. A pane can stay alive after a worker exits, especially when the worker was launched inside an existing shell pane.
+
+Active handshakes should verify three separate facts: the pane exists, the worker process exists, and the endpoint identity matches. Keep this simple and testable, not a complex IPC protocol.
+
+The agent registry should use concurrency-safe persistence. SQLite is the preferred default for V1 because concurrent starts must not allocate duplicate agent IDs or overwrite state.
+
+Adapter registration must be pluggable through injected or registered adapter maps. Do not hard-code future providers into `AgentManager`.
+
 For V1, keep the system split into a small number of clear modules with one main responsibility each. Do not turn the initial architecture into many independent microservices.
 
 Start with roughly these packages or services:
