@@ -16,6 +16,7 @@ class CommandRecord:
     finished_at: float
     duration_seconds: float
     pane_id: str | None = None
+    project_id: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -25,4 +26,6 @@ class CommandRecord:
 
     @classmethod
     def from_json(cls, data: str) -> CommandRecord:
-        return cls(**json.loads(data))
+        values = json.loads(data)
+        values.setdefault("project_id", None)
+        return cls(**values)

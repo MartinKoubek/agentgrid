@@ -1,5 +1,8 @@
 from agentgrid_project_context import ProjectContextBuilder
 
+from agentgrid_event_queue import EventQueue
+from agentgrid_shell_logger import ShellLogger
+
 
 class Agent:
     def __init__(self, id, state="RUNNING"):
@@ -72,3 +75,37 @@ def test_context_builder_supports_legacy_active_agents() -> None:
     context = ProjectContextBuilder(project_manager=LegacyProjectManager(), agent_manager=AgentManager()).get_context("demo")
 
     assert [agent["id"] for agent in context.agents] == ["ag-001"]
+
+
+def test_context_builder_filters_events_by_project_before_limit(tmp_path) -> None:
+    queue = EventQueue(tmp_path / "events.sqlite3")
+
+    for index in range(3):
+        queue.enqueue("PROJECT_A_EVENT", priority=10, project_id="project-a", payload={"index": index})
+    for index in range(20):
+        queue.enqueue("OTHER_EVENT", priority=90, project_id=f"project-{index}")
+
+    context = ProjectContextBuilder(project_manager=ProjectManager(), event_queue=queue).get_context(
+        "project-a",
+        level="summary",
+    )
+
+    assert len(context.events) == 3
+    assert {event["payload"]["project_id"] for event in context.events} == {"project-a"}
+
+
+def test_context_builder_filters_shell_logs_by_project_before_limit(tmp_path) -> None:
+    logger = ShellLogger(store_path=tmp_path / "shell-log.sqlite3")
+
+    for index in range(3):
+        logger.run(["python3.11", "-c", f"print('a-{index}')"], project_id="project-a")
+    for index in range(8):
+        logger.run(["python3.11", "-c", f"print('b-{index}')"], project_id="project-b")
+
+    context = ProjectContextBuilder(project_manager=ProjectManager(), shell_logger=logger).get_context(
+        "project-a",
+        level="summary",
+    )
+
+    assert len(context.shell_logs) == 3
+    assert {record["project_id"] for record in context.shell_logs} == {"project-a"}

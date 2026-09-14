@@ -52,3 +52,17 @@ def test_queue_preserves_payload_fields(tmp_path) -> None:
 
     loaded = queue.get(event.id)
     assert loaded.payload == {"agent_id": "ag-001", "pane_id": "%1", "extra": True}
+
+
+def test_queue_filters_project_before_limit(tmp_path) -> None:
+    queue = EventQueue(tmp_path / "events.sqlite3")
+
+    for index in range(3):
+        queue.enqueue("PROJECT_A_EVENT", priority=10, project_id="project-a", payload={"index": index})
+    for index in range(20):
+        queue.enqueue("OTHER_EVENT", priority=90, project_id=f"project-{index}")
+
+    records = queue.list(limit=10, project_id="project-a")
+
+    assert len(records) == 3
+    assert {record.payload["project_id"] for record in records} == {"project-a"}

@@ -12,7 +12,13 @@ class ShellLogger:
     def __init__(self, store_path: str | None = None, store: ShellLogStore | None = None) -> None:
         self.store = store or ShellLogStore(store_path)
 
-    def run(self, command: list[str], cwd: str | None = None, pane_id: str | None = None) -> CommandRecord:
+    def run(
+        self,
+        command: list[str],
+        cwd: str | None = None,
+        pane_id: str | None = None,
+        project_id: str | None = None,
+    ) -> CommandRecord:
         record_id = self.store.allocate_id()
         command_cwd = cwd or os.getcwd()
         started_at = time()
@@ -35,12 +41,13 @@ class ShellLogger:
             finished_at=finished_at,
             duration_seconds=finished_at - started_at,
             pane_id=pane_id,
+            project_id=project_id,
         )
         self.store.save(record)
         return record
 
-    def list(self, limit: int = 50) -> list[CommandRecord]:
-        return self.store.list(limit=limit)
+    def list(self, limit: int = 50, project_id: str | None = None) -> list[CommandRecord]:
+        return self.store.list(limit=limit, project_id=project_id)
 
     def inspect(self, record_id: str) -> CommandRecord:
         return self.store.get(record_id)

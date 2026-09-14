@@ -19,10 +19,12 @@ def build_parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run", parents=[common], help="run and log a command")
     run.add_argument("--cwd", help="working directory for the command")
     run.add_argument("--pane", help="tmux pane ID associated with this command")
+    run.add_argument("--project", help="project ID associated with this command")
     run.add_argument("command", nargs=argparse.REMAINDER)
 
     list_parser = subparsers.add_parser("list", parents=[common], help="list command records")
     list_parser.add_argument("--limit", type=int, default=50)
+    list_parser.add_argument("--project", help="project ID to list records for")
 
     inspect = subparsers.add_parser("inspect", parents=[common], help="inspect one command record")
     inspect.add_argument("record_id")
@@ -60,9 +62,9 @@ def run_command(logger: ShellLogger, args: argparse.Namespace) -> object:
             command = command[1:]
         if not command:
             raise ValueError("run requires a command after --")
-        return logger.run(command, cwd=args.cwd, pane_id=args.pane)
+        return logger.run(command, cwd=args.cwd, pane_id=args.pane, project_id=args.project)
     if args.command_name == "list":
-        return logger.list(limit=args.limit)
+        return logger.list(limit=args.limit, project_id=args.project)
     if args.command_name == "inspect":
         return logger.inspect(args.record_id)
     raise ValueError(f"unknown command: {args.command_name}")

@@ -125,7 +125,9 @@ def test_orchestrator_event_handler_maps_decisions(tmp_path) -> None:
 
 def test_orchestrator_decision_mapping_is_explicit() -> None:
     assert map_orchestrator_decision(type("Decision", (), {"action": "AGENT_STARTED"})()) == DispatchDecision.ACK
-    assert map_orchestrator_decision(type("Decision", (), {"action": "AGENT_FAILED"})()) == DispatchDecision.ACK
+    assert map_orchestrator_decision(type("Decision", (), {"action": "AGENT_FAILED"})()) == DispatchDecision.PARK
+    assert map_orchestrator_decision(type("Decision", (), {"action": "AGENT_OUTPUT_CHANGED"})()) == DispatchDecision.ACK
+    assert map_orchestrator_decision(type("Decision", (), {"action": "AGENT_EXITED"})()) == DispatchDecision.ACK
     assert map_orchestrator_decision(type("Decision", (), {"action": "ASK_USER"})()) == DispatchDecision.PARK
     assert map_orchestrator_decision(type("Decision", (), {"action": "WAITING_USER"})()) == DispatchDecision.PARK
     assert map_orchestrator_decision(type("Decision", (), {"action": "AGENT_WAITING_INPUT"})()) == DispatchDecision.PARK

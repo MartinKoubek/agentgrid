@@ -25,12 +25,14 @@ class ShellLogStore:
             return f"cmd-{next_value:03d}"
 
     def save(self, record: CommandRecord) -> None:
+        project_id = record.project_id
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
-                "INSERT INTO command_records(id, started_at, data) VALUES(?, ?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET started_at = excluded.started_at, data = excluded.data",
-                (record.id, record.started_at, record.to_json()),
+                "INSERT INTO command_records(id, started_at, project_id, data) VALUES(?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET "
+                "started_at = excluded.started_at, project_id = excluded.project_id, data = excluded.data",
+                (record.id, record.started_at, project_id, record.to_json()),
             )
 
     def get(self, record_id: str) -> CommandRecord:
@@ -40,12 +42,16 @@ class ShellLogStore:
             raise KeyError(f"command record not found: {record_id}")
         return CommandRecord.from_json(row[0])
 
-    def list(self, limit: int = 50) -> list[CommandRecord]:
+    def list(self, limit: int = 50, project_id: str | None = None) -> list[CommandRecord]:
+        sql = "SELECT data FROM command_records"
+        params: list[object] = []
+        if project_id is not None:
+            sql += " WHERE project_id = ?"
+            params.append(project_id)
+        sql += " ORDER BY started_at DESC LIMIT ?"
+        params.append(limit)
         with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT data FROM command_records ORDER BY started_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            rows = connection.execute(sql, params).fetchall()
         return [CommandRecord.from_json(row[0]) for row in rows]
 
     def _connect(self) -> sqlite3.Connection:
@@ -60,8 +66,13 @@ class ShellLogStore:
                 "CREATE TABLE IF NOT EXISTS command_records ("
                 "id TEXT PRIMARY KEY, "
                 "started_at REAL NOT NULL, "
+                "project_id TEXT, "
                 "data TEXT NOT NULL"
                 ")"
+            )
+            self._ensure_project_id_column(connection)
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_command_records_project ON command_records(project_id, started_at)"
             )
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS command_sequence ("
@@ -70,3 +81,16 @@ class ShellLogStore:
                 ")"
             )
             connection.execute("INSERT OR IGNORE INTO command_sequence(name, next_value) VALUES('command', 1)")
+
+    def _ensure_project_id_column(self, connection: sqlite3.Connection) -> None:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(command_records)").fetchall()}
+        if "project_id" not in columns:
+            connection.execute("ALTER TABLE command_records ADD COLUMN project_id TEXT")
+        rows = connection.execute("SELECT id, data FROM command_records WHERE project_id IS NULL").fetchall()
+        for record_id, data in rows:
+            record = CommandRecord.from_json(data)
+            if record.project_id is not None:
+                connection.execute(
+                    "UPDATE command_records SET project_id = ? WHERE id = ?",
+                    (record.project_id, record_id),
+                )

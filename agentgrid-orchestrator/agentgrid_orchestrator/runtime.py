@@ -138,7 +138,7 @@ def orchestrator_event_handler(orchestrator: Orchestrator):
 
 
 def map_orchestrator_decision(decision) -> DispatchDecision:
-    if decision.action in {"ASK_USER", "WAITING_USER", "AGENT_WAITING_INPUT"}:
+    if decision.action in {"ASK_USER", "WAITING_USER", "AGENT_WAITING_INPUT", "AGENT_FAILED"}:
         return DispatchDecision.PARK
     if decision.action in {"REQUEUE", "RETRY", "TEMPORARY_FAILURE"}:
         return DispatchDecision.REQUEUE

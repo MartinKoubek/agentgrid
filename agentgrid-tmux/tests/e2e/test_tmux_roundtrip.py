@@ -20,11 +20,10 @@ def require_tmux_can_allocate_panes() -> None:
     if shutil.which("tmux") is None:
         pytest.skip("tmux is not installed")
     socket_name = f"agentgrid-preflight-{uuid.uuid4().hex}"
+    run_tmux_or_skip(["tmux", "-L", socket_name, "new-session", "-d", "-s", "preflight-env", "bash"])
     client = TmuxClient(socket_name=socket_name)
     try:
         client.start_process("bash", session="preflight")
-    except subprocess.TimeoutExpired as exc:
-        pytest.skip(f"tmux cannot allocate a test pane: {exc}")
     except TmuxCommandError as exc:
         if "Device not configured" in str(exc):
             pytest.skip(f"tmux cannot allocate a test pane: {exc}")

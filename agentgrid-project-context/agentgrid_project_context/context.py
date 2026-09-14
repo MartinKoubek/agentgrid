@@ -70,8 +70,16 @@ class ProjectContextBuilder:
     def _shell_logs(self, project_id: str, project: dict[str, object] | None, level: str) -> list[dict[str, object]]:
         if not self.shell_logger:
             return []
+        limit = 5 if level == "summary" else 20
         try:
-            records = [to_dict(record) for record in self.shell_logger.list(limit=5 if level == "summary" else 20)]
+            return [to_dict(record) for record in self.shell_logger.list(limit=limit, project_id=project_id)]
+        except TypeError:
+            pass
+        except Exception:
+            return []
+
+        try:
+            records = [to_dict(record) for record in self.shell_logger.list(limit=limit)]
         except Exception:
             return []
 
@@ -91,8 +99,16 @@ class ProjectContextBuilder:
     def _events(self, project_id: str, project: dict[str, object] | None, level: str) -> list[dict[str, object]]:
         if not self.event_queue:
             return []
+        limit = 10 if level == "summary" else 50
         try:
-            events = [to_dict(event) for event in self.event_queue.list(limit=10 if level == "summary" else 50)]
+            return [to_dict(event) for event in self.event_queue.list(limit=limit, project_id=project_id)]
+        except TypeError:
+            pass
+        except Exception:
+            return []
+
+        try:
+            events = [to_dict(event) for event in self.event_queue.list(limit=limit)]
         except Exception:
             return []
 

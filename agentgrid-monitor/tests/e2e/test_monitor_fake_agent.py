@@ -23,6 +23,7 @@ def require_tmux_can_allocate_panes(tmp_path) -> None:
     if shutil.which("tmux") is None:
         pytest.skip("tmux is not installed")
     socket_name = f"agentgrid-monitor-preflight-{uuid.uuid4().hex}"
+    run_tmux_or_skip(["tmux", "-L", socket_name, "new-session", "-d", "-s", "preflight-env", "bash"])
     tmux = TmuxClient(socket_name=socket_name)
     manager = AgentManager(
         tmux=tmux,
@@ -32,8 +33,8 @@ def require_tmux_can_allocate_panes(tmp_path) -> None:
     try:
         agent = manager.start(adapter="fake", session="preflight")
         manager.stop(agent.id)
-    except (TmuxCommandError, subprocess.TimeoutExpired) as exc:
-        if "Device not configured" in str(exc) or "timed out" in str(exc):
+    except TmuxCommandError as exc:
+        if "Device not configured" in str(exc):
             pytest.skip(f"tmux cannot allocate a test pane: {exc}")
         raise
     finally:
@@ -41,6 +42,15 @@ def require_tmux_can_allocate_panes(tmp_path) -> None:
             tmux.kill_server()
         except subprocess.TimeoutExpired:
             pass
+
+
+def run_tmux_or_skip(command: list[str]) -> None:
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    if completed.returncode == 0:
+        return
+    if "Device not configured" in completed.stderr:
+        pytest.skip(f"tmux cannot allocate a test pane: {completed.stderr.strip()}")
+    raise subprocess.CalledProcessError(completed.returncode, command, completed.stdout, completed.stderr)
 
 
 def wait_for_event(monitor: Monitor, event_type: EventType, timeout: float = 3.0):

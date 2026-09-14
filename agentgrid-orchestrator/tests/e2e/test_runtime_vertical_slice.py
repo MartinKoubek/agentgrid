@@ -37,12 +37,13 @@ def wait_for_stopped(runtime: AgentGridRuntime, agent_id: str, timeout: float = 
 
 
 def require_tmux_runtime(tmp_path, socket_name: str) -> None:
+    run_tmux_or_skip(["tmux", "-L", socket_name, "new-session", "-d", "-s", "preflight-env", "bash"])
     runtime = AgentGridRuntime(tmp_path / "preflight-runtime", socket_name=socket_name)
     try:
         agent = runtime.agent_manager.start(adapter="fake", session="agentgrid-preflight")
         runtime.agent_manager.stop(agent.id)
-    except (TmuxCommandError, subprocess.TimeoutExpired) as exc:
-        if "Device not configured" in str(exc) or "timed out" in str(exc):
+    except TmuxCommandError as exc:
+        if "Device not configured" in str(exc):
             pytest.skip(f"tmux cannot allocate a test pane: {exc}")
         raise
     finally:
@@ -50,6 +51,15 @@ def require_tmux_runtime(tmp_path, socket_name: str) -> None:
             runtime.tmux.kill_server()
         except subprocess.TimeoutExpired:
             pass
+
+
+def run_tmux_or_skip(command: list[str]) -> None:
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    if completed.returncode == 0:
+        return
+    if "Device not configured" in completed.stderr:
+        pytest.skip(f"tmux cannot allocate a test pane: {completed.stderr.strip()}")
+    raise subprocess.CalledProcessError(completed.returncode, command, completed.stdout, completed.stderr)
 
 
 def dispatch_all(runtime: AgentGridRuntime) -> list[str]:

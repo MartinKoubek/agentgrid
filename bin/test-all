@@ -25,7 +25,7 @@ modules=(
   agentgrid-cross-context
 )
 
-module_path=".:../agentgrid-agent:../agentgrid-tmux:../agentgrid-event-queue:../agentgrid-dispatcher:../agentgrid-monitor:../agentgrid-project-manager:../agentgrid-project-memory:../agentgrid-project-context:../agentgrid-context-router:../agentgrid-policy"
+module_path=".:../agentgrid-agent:../agentgrid-tmux:../agentgrid-event-queue:../agentgrid-dispatcher:../agentgrid-monitor:../agentgrid-project-manager:../agentgrid-project-memory:../agentgrid-project-context:../agentgrid-context-router:../agentgrid-policy:../agentgrid-shell-logger"
 
 for module in "${modules[@]}"; do
   echo "--- $module"

@@ -36,3 +36,17 @@ def test_shell_logger_lists_recent_commands(tmp_path) -> None:
     records = logger.list(limit=2)
 
     assert [record.id for record in records] == [second.id, first.id]
+
+
+def test_shell_logger_filters_project_before_limit(tmp_path) -> None:
+    logger = ShellLogger(store_path=tmp_path / "shell-log.sqlite3")
+
+    for index in range(3):
+        logger.run(["python3.11", "-c", f"print('a-{index}')"], project_id="project-a")
+    for index in range(8):
+        logger.run(["python3.11", "-c", f"print('b-{index}')"], project_id="project-b")
+
+    records = logger.list(limit=5, project_id="project-a")
+
+    assert len(records) == 3
+    assert {record.project_id for record in records} == {"project-a"}

@@ -21,8 +21,11 @@ class EventQueue:
         dedupe_key: str | None = None,
         agent_id: str | None = None,
         pane_id: str | None = None,
+        project_id: str | None = None,
     ) -> EventRecord:
         event_payload = dict(payload or {})
+        if project_id is not None:
+            event_payload["project_id"] = project_id
         if agent_id is not None:
             event_payload["agent_id"] = agent_id
         if pane_id is not None:
@@ -77,12 +80,23 @@ class EventQueue:
             raise KeyError(f"event not found: {event_id}")
         return EventRecord.from_json(row[0])
 
-    def list(self, status: str | None = None, limit: int = 100) -> list[EventRecord]:
+    def list(
+        self,
+        status: str | None = None,
+        limit: int = 100,
+        project_id: str | None = None,
+    ) -> list[EventRecord]:
         sql = "SELECT data FROM events"
+        where = []
         params: list[object] = []
         if status:
-            sql += " WHERE status = ?"
+            where.append("status = ?")
             params.append(status)
+        if project_id is not None:
+            where.append("project_id = ?")
+            params.append(project_id)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY priority DESC, created_at ASC LIMIT ?"
         params.append(limit)
         with self._connect() as connection:
@@ -111,18 +125,22 @@ class EventQueue:
         return f"ev-{next_value:03d}"
 
     def _upsert(self, connection: sqlite3.Connection, event: EventRecord) -> None:
+        project_id = event.payload.get("project_id")
+        project_id_value = str(project_id) if project_id is not None else None
         connection.execute(
-            "INSERT INTO events(id, type, priority, status, dedupe_key, created_at, updated_at, data) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?) "
+            "INSERT INTO events(id, type, priority, status, dedupe_key, project_id, created_at, updated_at, data) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET "
             "type = excluded.type, priority = excluded.priority, status = excluded.status, "
-            "dedupe_key = excluded.dedupe_key, updated_at = excluded.updated_at, data = excluded.data",
+            "dedupe_key = excluded.dedupe_key, project_id = excluded.project_id, "
+            "updated_at = excluded.updated_at, data = excluded.data",
             (
                 event.id,
                 event.type,
                 event.priority,
                 event.status.value,
                 event.dedupe_key,
+                project_id_value,
                 event.created_at,
                 event.updated_at,
                 event.to_json(),
@@ -140,12 +158,25 @@ class EventQueue:
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS events ("
                 "id TEXT PRIMARY KEY, type TEXT NOT NULL, priority INTEGER NOT NULL, "
-                "status TEXT NOT NULL, dedupe_key TEXT, created_at REAL NOT NULL, "
+                "status TEXT NOT NULL, dedupe_key TEXT, project_id TEXT, created_at REAL NOT NULL, "
                 "updated_at REAL NOT NULL, data TEXT NOT NULL)"
             )
+            self._ensure_project_id_column(connection)
             connection.execute("CREATE INDEX IF NOT EXISTS idx_events_next ON events(status, priority, created_at)")
             connection.execute("CREATE INDEX IF NOT EXISTS idx_events_dedupe ON events(dedupe_key, status)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id, priority, created_at)")
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS event_sequence (name TEXT PRIMARY KEY, next_value INTEGER NOT NULL)"
             )
             connection.execute("INSERT OR IGNORE INTO event_sequence(name, next_value) VALUES('event', 1)")
+
+    def _ensure_project_id_column(self, connection: sqlite3.Connection) -> None:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
+        if "project_id" not in columns:
+            connection.execute("ALTER TABLE events ADD COLUMN project_id TEXT")
+        rows = connection.execute("SELECT id, data FROM events WHERE project_id IS NULL").fetchall()
+        for event_id, data in rows:
+            event = EventRecord.from_json(data)
+            project_id = event.payload.get("project_id")
+            if project_id is not None:
+                connection.execute("UPDATE events SET project_id = ? WHERE id = ?", (str(project_id), event_id))
