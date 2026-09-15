@@ -14,12 +14,11 @@ def handshake(
 ) -> HandshakeResult:
     try:
         pane = client.inspect_pane(pane_id)
+        runtime_pid = _parse_pid(client.get_pane_option(pane_id, "@agentgrid_runtime_pid")) or pane.pid
+        endpoint_id = client.get_pane_option(pane_id, "@agentgrid_endpoint_id") or None
+        agent_alive = _process_exists(runtime_pid) if runtime_pid else False
     except TmuxError as exc:
         return HandshakeResult(reachable=False, pane_id=pane_id, pane_alive=False, agent_alive=False, error=str(exc))
-
-    runtime_pid = _parse_pid(client.get_pane_option(pane_id, "@agentgrid_runtime_pid")) or pane.pid
-    endpoint_id = client.get_pane_option(pane_id, "@agentgrid_endpoint_id") or None
-    agent_alive = _process_exists(runtime_pid) if runtime_pid else False
 
     result = HandshakeResult(
         reachable=True,

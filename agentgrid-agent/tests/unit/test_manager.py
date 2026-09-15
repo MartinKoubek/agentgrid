@@ -71,6 +71,20 @@ class FakeTmux:
         )
 
 
+class DisappearingTmux(FakeTmux):
+    def handshake(self, pane_id, active=False, expected_endpoint_id=None):
+        if not self.alive:
+            return HandshakeResult(
+                reachable=False,
+                pane_id=pane_id,
+                pane_alive=False,
+                agent_alive=False,
+                expected_endpoint_id=expected_endpoint_id,
+                error="server exited unexpectedly",
+            )
+        return super().handshake(pane_id, active=active, expected_endpoint_id=expected_endpoint_id)
+
+
 def test_manager_starts_sends_reads_and_stops_agent(tmp_path) -> None:
     tmux = FakeTmux()
     manager = AgentManager(
@@ -131,3 +145,32 @@ def test_manager_detects_runtime_pid_mismatch(tmp_path) -> None:
 
     assert manager.is_alive(agent.id) is False
     assert manager.inspect(agent.id).state == AgentState.STOPPED
+
+
+def test_manager_marks_stopped_when_endpoint_disappears_after_exit(tmp_path) -> None:
+    tmux = DisappearingTmux()
+    manager = AgentManager(
+        tmux=tmux,
+        registry=FileAgentRegistry(tmp_path / "agents.sqlite3"),
+        adapters={"fake": FakeAgentAdapter(tmux)},
+    )
+    agent = manager.start(adapter="fake")
+
+    manager.send(agent.id, "exit")
+
+    assert manager.is_alive(agent.id) is False
+    assert manager.inspect(agent.id).state == AgentState.STOPPED
+
+
+def test_manager_stop_marks_stopped_when_endpoint_disappears(tmp_path) -> None:
+    tmux = DisappearingTmux()
+    manager = AgentManager(
+        tmux=tmux,
+        registry=FileAgentRegistry(tmp_path / "agents.sqlite3"),
+        adapters={"fake": FakeAgentAdapter(tmux)},
+    )
+    agent = manager.start(adapter="fake")
+
+    stopped = manager.stop(agent.id)
+
+    assert stopped.state == AgentState.STOPPED
