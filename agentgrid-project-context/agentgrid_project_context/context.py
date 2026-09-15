@@ -71,60 +71,13 @@ class ProjectContextBuilder:
         if not self.shell_logger:
             return []
         limit = 5 if level == "summary" else 20
-        try:
-            return [to_dict(record) for record in self.shell_logger.list(limit=limit, project_id=project_id)]
-        except TypeError:
-            pass
-        except Exception:
-            return []
-
-        try:
-            records = [to_dict(record) for record in self.shell_logger.list(limit=limit)]
-        except Exception:
-            return []
-
-        pane_ids = set()
-        if project is None:
-            return []
-        if isinstance(project.get("workspace"), dict):
-            panes = project["workspace"].get("pane_ids")
-            if isinstance(panes, list):
-                pane_ids = {str(pane_id) for pane_id in panes}
-        return [
-            record
-            for record in records
-            if record.get("project_id") == project_id or (pane_ids and record.get("pane_id") in pane_ids)
-        ]
+        return [to_dict(record) for record in self.shell_logger.list(limit=limit, project_id=project_id)]
 
     def _events(self, project_id: str, project: dict[str, object] | None, level: str) -> list[dict[str, object]]:
         if not self.event_queue:
             return []
         limit = 10 if level == "summary" else 50
-        try:
-            return [to_dict(event) for event in self.event_queue.list(limit=limit, project_id=project_id)]
-        except TypeError:
-            pass
-        except Exception:
-            return []
-
-        try:
-            events = [to_dict(event) for event in self.event_queue.list(limit=limit)]
-        except Exception:
-            return []
-
-        if project is None:
-            return []
-        project_agents = {str(agent_id) for agent_id in project_agent_ids(project)}
-        scoped_events = []
-        for event in events:
-            payload = event.get("payload", {})
-            if not isinstance(payload, dict):
-                continue
-            if payload.get("project_id") == project_id:
-                scoped_events.append(event)
-            elif project_agents and str(payload.get("agent_id")) in project_agents:
-                scoped_events.append(event)
-        return scoped_events
+        return [to_dict(event) for event in self.event_queue.list(limit=limit, project_id=project_id)]
 
 
 def to_dict(value: object) -> dict[str, object]:

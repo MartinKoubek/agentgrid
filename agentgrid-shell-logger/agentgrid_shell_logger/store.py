@@ -84,8 +84,12 @@ class ShellLogStore:
 
     def _ensure_project_id_column(self, connection: sqlite3.Connection) -> None:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(command_records)").fetchall()}
-        if "project_id" not in columns:
-            connection.execute("ALTER TABLE command_records ADD COLUMN project_id TEXT")
+        if "project_id" in columns:
+            return
+        connection.execute("ALTER TABLE command_records ADD COLUMN project_id TEXT")
+        self._backfill_project_ids(connection)
+
+    def _backfill_project_ids(self, connection: sqlite3.Connection) -> None:
         rows = connection.execute("SELECT id, data FROM command_records WHERE project_id IS NULL").fetchall()
         for record_id, data in rows:
             record = CommandRecord.from_json(data)

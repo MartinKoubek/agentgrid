@@ -47,7 +47,7 @@ def wait_for_text(client: TmuxClient, pane_id: str, text: str, timeout: float = 
 
 
 def run_tmux_or_skip(command: list[str]) -> None:
-    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    completed = subprocess.run(command, capture_output=True, text=True, check=False, timeout=30)
     if completed.returncode == 0:
         return
     if "Device not configured" in completed.stderr:
@@ -105,7 +105,7 @@ def test_tmux_discover_handshake_write_read_and_exit() -> None:
             time.sleep(0.05)
         assert client.handshake(pane_id).reachable is False
     finally:
-        subprocess.run(["tmux", "-L", socket_name, "kill-server"], check=False)
+        subprocess.run(["tmux", "-L", socket_name, "kill-server"], check=False, timeout=5)
 
 
 def test_tmux_existing_pane_launch_tracks_worker_separately_from_shell() -> None:
@@ -208,4 +208,4 @@ def test_tmux_interactive_prompt_roundtrip() -> None:
 
         assert "DONE" in wait_for_text(client, pane_id, "DONE")
     finally:
-        subprocess.run(["tmux", "-L", socket_name, "kill-server"], check=False)
+        subprocess.run(["tmux", "-L", socket_name, "kill-server"], check=False, timeout=5)

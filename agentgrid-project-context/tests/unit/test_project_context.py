@@ -3,6 +3,8 @@ from agentgrid_project_context import ProjectContextBuilder
 from agentgrid_event_queue import EventQueue
 from agentgrid_shell_logger import ShellLogger
 
+import pytest
+
 
 class Agent:
     def __init__(self, id, state="RUNNING"):
@@ -109,3 +111,21 @@ def test_context_builder_filters_shell_logs_by_project_before_limit(tmp_path) ->
 
     assert len(context.shell_logs) == 3
     assert {record["project_id"] for record in context.shell_logs} == {"project-a"}
+
+
+def test_context_builder_does_not_hide_event_queue_type_errors() -> None:
+    class BrokenEventQueue:
+        def list(self, limit=100, project_id=None):
+            raise TypeError("bug inside event queue")
+
+    with pytest.raises(TypeError, match="bug inside event queue"):
+        ProjectContextBuilder(project_manager=ProjectManager(), event_queue=BrokenEventQueue()).get_context("demo")
+
+
+def test_context_builder_does_not_hide_shell_logger_type_errors() -> None:
+    class BrokenShellLogger:
+        def list(self, limit=50, project_id=None):
+            raise TypeError("bug inside shell logger")
+
+    with pytest.raises(TypeError, match="bug inside shell logger"):
+        ProjectContextBuilder(project_manager=ProjectManager(), shell_logger=BrokenShellLogger()).get_context("demo")

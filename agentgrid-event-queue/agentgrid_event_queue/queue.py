@@ -172,8 +172,12 @@ class EventQueue:
 
     def _ensure_project_id_column(self, connection: sqlite3.Connection) -> None:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(events)").fetchall()}
-        if "project_id" not in columns:
-            connection.execute("ALTER TABLE events ADD COLUMN project_id TEXT")
+        if "project_id" in columns:
+            return
+        connection.execute("ALTER TABLE events ADD COLUMN project_id TEXT")
+        self._backfill_project_ids(connection)
+
+    def _backfill_project_ids(self, connection: sqlite3.Connection) -> None:
         rows = connection.execute("SELECT id, data FROM events WHERE project_id IS NULL").fetchall()
         for event_id, data in rows:
             event = EventRecord.from_json(data)

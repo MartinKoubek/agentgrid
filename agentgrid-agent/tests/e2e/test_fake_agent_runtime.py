@@ -45,7 +45,7 @@ def require_tmux_can_allocate_panes(tmp_path) -> None:
 
 
 def run_tmux_or_skip(command: list[str]) -> None:
-    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    completed = subprocess.run(command, capture_output=True, text=True, check=False, timeout=30)
     if completed.returncode == 0:
         return
     if "Device not configured" in completed.stderr:

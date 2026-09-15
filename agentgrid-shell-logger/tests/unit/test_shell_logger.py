@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from agentgrid_shell_logger import ShellLogger
+import json
+import sqlite3
+
+from agentgrid_shell_logger import ShellLogger, ShellLogStore
 
 
 def test_shell_logger_records_successful_command(tmp_path) -> None:
@@ -50,3 +53,54 @@ def test_shell_logger_filters_project_before_limit(tmp_path) -> None:
 
     assert len(records) == 3
     assert {record.project_id for record in records} == {"project-a"}
+
+
+def test_shell_log_store_migrates_legacy_project_id_once(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "shell-log.sqlite3"
+    legacy_record = {
+        "id": "cmd-001",
+        "command": ["echo", "hello"],
+        "cwd": "/tmp",
+        "stdout": "hello\n",
+        "stderr": "",
+        "exit_code": 0,
+        "started_at": 1.0,
+        "finished_at": 1.1,
+        "duration_seconds": 0.1,
+        "pane_id": None,
+        "project_id": "project-a",
+    }
+    global_record = {
+        "id": "cmd-002",
+        "command": ["echo", "global"],
+        "cwd": "/tmp",
+        "stdout": "global\n",
+        "stderr": "",
+        "exit_code": 0,
+        "started_at": 2.0,
+        "finished_at": 2.1,
+        "duration_seconds": 0.1,
+        "pane_id": None,
+    }
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE command_records ("
+            "id TEXT PRIMARY KEY, started_at REAL NOT NULL, data TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO command_records(id, started_at, data) VALUES(?, ?, ?)",
+            ("cmd-001", 1.0, json.dumps(legacy_record)),
+        )
+        connection.execute(
+            "INSERT INTO command_records(id, started_at, data) VALUES(?, ?, ?)",
+            ("cmd-002", 2.0, json.dumps(global_record)),
+        )
+
+    store = ShellLogStore(path)
+    assert [record.id for record in store.list(project_id="project-a")] == ["cmd-001"]
+
+    def fail_backfill(*args, **kwargs):
+        raise AssertionError("backfill should not run after migration")
+
+    monkeypatch.setattr(ShellLogStore, "_backfill_project_ids", fail_backfill)
+    ShellLogStore(path)
