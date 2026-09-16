@@ -5,6 +5,7 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
+from shlex import quote
 
 import pytest
 
@@ -181,6 +182,73 @@ def test_tmux_follow_can_be_started_and_stopped(tmp_path) -> None:
         time.sleep(0.3)
         after = output_path.read_text(encoding="utf-8")
         assert after == before
+    finally:
+        client.kill_server()
+
+
+def test_tmux_paste_text_delivers_multiline_prompt_as_one_terminal_paste(tmp_path) -> None:
+    if shutil.which("tmux") is None:
+        pytest.skip("tmux is not installed")
+
+    socket_name = f"agentgrid-test-{uuid.uuid4().hex}"
+    client = TmuxClient(socket_name=socket_name)
+    output_path = tmp_path / "received.bin"
+    recorder_path = tmp_path / "recorder.py"
+    recorder_path.write_text(
+        """
+from __future__ import annotations
+
+import select
+import sys
+import termios
+import time
+import tty
+
+output_path = sys.argv[1]
+fd = sys.stdin.fileno()
+old_attrs = termios.tcgetattr(fd)
+data = bytearray()
+
+try:
+    tty.setraw(fd)
+    print("RECORDER_READY", flush=True)
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        readable, _, _ = select.select([sys.stdin], [], [], 0.1)
+        if not readable:
+            continue
+        chunk = sys.stdin.buffer.read(1)
+        if not chunk:
+            break
+        data.extend(chunk)
+        if data.endswith(b"\r"):
+            break
+finally:
+    termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+    with open(output_path, "wb") as output_file:
+        output_file.write(bytes(data))
+    print("RECORDER_DONE", flush=True)
+""".strip(),
+        encoding="utf-8",
+    )
+    prompt = "First paragraph with café.\n\nSecond paragraph: $(rm -rf /) && echo '$PATH' * ?"
+
+    try:
+        pane = client.start_process(
+            f"python3.11 -u {quote(str(recorder_path))} {quote(str(output_path))}",
+            session="paste-recorder",
+        )
+        wait_for_text(client, pane.pane_id, "RECORDER_READY")
+        client.paste_text(pane.pane_id, prompt)
+        client.send_key(pane.pane_id, "ENTER")
+        wait_for_text(client, pane.pane_id, "RECORDER_DONE")
+
+        received = output_path.read_bytes()
+        prompt_bytes = prompt.encode("utf-8")
+        assert received.count(prompt_bytes) == 1
+        assert received.startswith(b"\x1b[200~")
+        assert prompt_bytes in received
+        assert b"\x1b[201~\r" in received
     finally:
         client.kill_server()
 

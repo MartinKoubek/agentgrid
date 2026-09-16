@@ -61,7 +61,7 @@ The first standalone component is `agentgrid-tmux`. Build and maintain it before
 
 `agentgrid-tmux` is the only module allowed to execute tmux commands directly. Its job is to discover tmux resources, establish pane reachability, read from panes, write to panes, stream pane output, and report pane state through a stable machine-readable API and CLI. It must know nothing about Codex, AI agents, providers, orchestration, memory, or event routing.
 
-Prefer stable tmux pane IDs such as `%17` over positional targets like `session:3.1`, because indices can move. Distinguish text from keys in public APIs, for example `send_text("hello")` versus `send_key("ENTER")`.
+Prefer stable tmux pane IDs such as `%17` over positional targets like `session:3.1`, because indices can move. Distinguish text, paste, and keys in public APIs, for example `send_text("hello")`, `paste_text("hello\nworld")`, and `send_key("ENTER")`.
 
 Handshake behavior must be safe by default:
 
@@ -172,6 +172,7 @@ Tmux I/O examples:
 ./bin/tmuxio inspect %17 --json
 ./bin/tmuxio read %17 --lines 100
 ./bin/tmuxio write %17 "echo hello"
+./bin/tmuxio paste %17 "multiline prompt"
 ./bin/tmuxio key %17 ENTER
 ./bin/tmuxio follow %17
 ./bin/tmuxio stop-follow %17

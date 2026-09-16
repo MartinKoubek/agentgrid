@@ -38,6 +38,9 @@ class PaneEndpoint:
     def send_key(self, key: str) -> None:
         self.client.send_key(self.pane_id, key)
 
+    def paste_text(self, text: str, bracketed: bool = True) -> None:
+        self.client.paste_text(self.pane_id, text, bracketed=bracketed)
+
     def write(self, text: str, enter: bool = True) -> None:
         self.client.write(self.pane_id, text, enter=enter)
 

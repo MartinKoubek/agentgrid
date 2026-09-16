@@ -56,6 +56,7 @@ agentgrid-tmux inspect %17 --json
 agentgrid-tmux handshake %17 --json
 agentgrid-tmux read %17 --lines 50
 agentgrid-tmux write %17 "echo hello"
+agentgrid-tmux paste %17 "multiline prompt"
 agentgrid-tmux key %17 ENTER
 agentgrid-tmux follow %17
 agentgrid-tmux stop-follow %17
@@ -90,6 +91,16 @@ Write text and press enter:
 ```sh
 bin/tmuxio write %17 "echo hello"
 ```
+
+Paste multiline text without shell evaluation:
+
+```sh
+bin/tmuxio paste %17 "first line
+second line"
+bin/tmuxio key %17 ENTER
+```
+
+`paste` uses a unique temporary tmux buffer, bracketed paste by default, and removes the buffer after use. Use it for large or multiline prompts where literal newlines, Unicode, and shell metacharacters must arrive as one pasted input.
 
 Type text without pressing enter, then press enter separately:
 
@@ -143,6 +154,7 @@ pane = tmux.get_pane("%17")
 
 pane.read()
 pane.write("ls -la")
+pane.paste_text("first line\nsecond line")
 pane.send_key("ENTER")
 pane.is_alive()
 pane.info()

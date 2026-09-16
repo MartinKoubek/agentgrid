@@ -13,7 +13,7 @@ from tmuxio.handshake import handshake
 from tmuxio.models import HandshakeResult, Pane, Session, TmuxCommandResult, Window
 from tmuxio.reader import read_pane
 from tmuxio.stream import follow_pane
-from tmuxio.writer import send_key, send_text, write_text
+from tmuxio.writer import paste_text, send_key, send_text, write_text
 
 
 FIELD_SEPARATOR = "\t"
@@ -250,6 +250,9 @@ class TmuxClient:
 
     def send_key(self, pane_id: str, key: str) -> None:
         send_key(self, pane_id, key)
+
+    def paste_text(self, pane_id: str, text: str, bracketed: bool = True) -> None:
+        paste_text(self, pane_id, text, bracketed=bracketed)
 
     def write(self, pane_id: str, text: str, enter: bool = True) -> None:
         write_text(self, pane_id, text, enter=enter)

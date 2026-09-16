@@ -44,6 +44,11 @@ def build_parser() -> argparse.ArgumentParser:
     write.add_argument("text")
     write.add_argument("--no-enter", action="store_true", help="do not press ENTER after text")
 
+    paste = subparsers.add_parser("paste", parents=[common], help="paste multiline text to a pane")
+    paste.add_argument("pane_id")
+    paste.add_argument("text")
+    paste.add_argument("--no-bracketed", action="store_true", help="disable bracketed paste mode")
+
     key = subparsers.add_parser("key", parents=[common], help="send a key to a pane")
     key.add_argument("pane_id")
     key.add_argument("key")
@@ -94,6 +99,9 @@ def run_command(client: TmuxClient, args: argparse.Namespace) -> object:
         return client.read(args.pane_id, lines=args.lines)
     if args.command == "write":
         client.write(args.pane_id, args.text, enter=not args.no_enter)
+        return {"ok": True}
+    if args.command == "paste":
+        client.paste_text(args.pane_id, args.text, bracketed=not args.no_bracketed)
         return {"ok": True}
     if args.command == "key":
         client.send_key(args.pane_id, args.key)

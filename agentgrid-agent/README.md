@@ -126,7 +126,9 @@ class AgentAdapter:
 
 The included `fake` adapter is deterministic and intended for local tests. It responds to input with `ACK: <input>` and exits when it receives `exit`.
 
-The included `codex` adapter is an MVP provider adapter for the local Codex CLI. It launches `codex --no-alt-screen --ask-for-approval on-request --sandbox workspace-write` inside a tmux pane through `agentgrid-tmux`, reuses the user's existing Codex CLI authentication and configuration, sends prompts through tmux text/key APIs, reads terminal output through pane capture, and uses the shared endpoint/runtime PID handshake for liveness.
+The included `codex` adapter is an MVP provider adapter for the local Codex CLI. It launches `codex --no-alt-screen --ask-for-approval on-request --sandbox workspace-write` inside a tmux pane through `agentgrid-tmux`, reuses the user's existing Codex CLI authentication and configuration, waits for conservative input readiness, submits prompts through tmux bracketed paste plus one Enter, reads terminal output through pane capture, and uses the shared endpoint/runtime PID handshake for liveness.
+
+Startup readiness is intentionally conservative. The installed `codex` CLI exposes no stable machine-readable readiness signal in `codex --help`, so the adapter waits for live process output to settle and fails clearly on known blocking startup prompts such as update, local data repair, and login/authentication prompts. If startup fails, the agent is marked `FAILED` and the manager attempts best-effort cleanup instead of silently sending a task into an unknown UI state.
 
 Manual Codex smoke test:
 
@@ -140,12 +142,21 @@ tmux -L agentgrid-codex start-server
 tmux -L agentgrid-codex kill-server
 ```
 
+Optional real Codex E2E smoke test:
+
+```sh
+AGENTGRID_TEST_REAL_CODEX=1 python3.11 -m pytest agentgrid-agent/tests/e2e/test_codex_adapter_runtime.py -q
+```
+
+This test is opt-in because it requires local `codex` credentials, network/model access, and quota. It checks response-only markers that are not present verbatim in the prompts and sends a second related request to the same worker.
+
 Known Codex adapter limitations for V1:
 
 - No semantic task completion detection.
 - No Codex approval or waiting-input detection.
 - No automatic task result extraction.
 - No autonomous build, test, or repair loop.
+- Input readiness uses conservative output quiescence until a Codex protocol adapter exists.
 
 ## Liveness
 
