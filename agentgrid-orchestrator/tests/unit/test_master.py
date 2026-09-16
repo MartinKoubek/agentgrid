@@ -53,12 +53,32 @@ class FakeAgentManager:
 
 
 class RecordingOrchestrator:
-    def __init__(self, action="START_AGENT") -> None:
+    def __init__(self, action="START_AGENT", policy_action=None) -> None:
         self.routes = []
         self.action = action
+        self.policy_action = policy_action
 
     def execute_route(self, request, route, target_project_id=None):
         self.routes.append((request, route, target_project_id))
+        if self.policy_action is not None:
+            return type(
+                "Decision",
+                (),
+                {
+                    "action": self.policy_action,
+                    "reason": "policy result",
+                    "project_id": target_project_id,
+                    "agent_id": route.agent_id,
+                    "details": {"request": request},
+                    "to_dict": lambda self: {
+                        "action": self.action,
+                        "reason": self.reason,
+                        "project_id": self.project_id,
+                        "agent_id": self.agent_id,
+                        "details": self.details,
+                    },
+                },
+            )()
         return type(
             "Decision",
             (),
@@ -119,6 +139,21 @@ def test_master_starts_validated_project_worker(tmp_path) -> None:
     assert result.action == "START_AGENT"
     assert len(orchestrator.routes) == 1
     assert master.request_store.get("mr-1").status == "EXECUTED"
+
+
+def test_master_persists_policy_denial_without_dispatch_success(tmp_path) -> None:
+    orchestrator = RecordingOrchestrator(policy_action="DENY")
+    master = workflow(
+        tmp_path,
+        FakeMasterProvider([{"version": 1, "action": "START_AGENT", "project_id": "project-a", "reason": "new worker"}]),
+        orchestrator=orchestrator,
+    )
+
+    result = master.handle_request("force-push protected branch", "project-a", request_id="mr-policy-deny")
+
+    assert result.action == "DENY"
+    assert len(orchestrator.routes) == 1
+    assert master.request_store.get("mr-policy-deny").status == "FAILED"
 
 
 def test_master_parks_continue_without_explicit_confirmation(tmp_path) -> None:

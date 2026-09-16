@@ -1,4 +1,6 @@
 from agentgrid_orchestrator import Orchestrator
+from agentgrid_orchestrator.cli import exit_code_for_output
+from agentgrid_orchestrator.models import OrchestratorDecision
 from agentgrid_orchestrator.runtime import enqueue_monitor_events, map_orchestrator_decision, orchestrator_event_handler
 from agentgrid_dispatcher import DispatchDecision
 from agentgrid_event_queue import EventQueue, EventStatus
@@ -32,6 +34,16 @@ class ContinueRouter:
 class FakePolicy:
     def decide(self, action, details=None):
         return "ALLOW"
+
+
+class StaticPolicy:
+    def __init__(self, decision: str) -> None:
+        self.decision = decision
+        self.calls = []
+
+    def decide(self, action, details=None):
+        self.calls.append((action, details))
+        return self.decision
 
 
 class FakeProject:
@@ -120,6 +132,38 @@ def test_orchestrator_starts_agent_with_project_cwd() -> None:
     assert agent_manager.sent == [("ag-001", "fix bug")]
     assert project_manager.project.agents == ["ag-001"]
     assert project_manager.project.config["agent_tasks"] == {"ag-001": "fix bug"}
+
+
+def test_execute_route_enforces_policy_before_starting_agent() -> None:
+    agent_manager = RecordingAgentManager()
+    policy = StaticPolicy("DENY")
+
+    decision = Orchestrator(
+        policy_engine=policy,
+        agent_manager=agent_manager,
+        project_manager=FakeProjectManager(),
+    ).execute_route("force-push protected branch", FakeRoute(), "demo")
+
+    assert decision.action == "DENY"
+    assert agent_manager.started == []
+    assert agent_manager.sent == []
+    assert policy.calls[0][1]["route_type"] == "START_AGENT"
+
+
+def test_execute_route_enforces_policy_before_continuing_agent() -> None:
+    agent_manager = RecordingAgentManager()
+    policy = StaticPolicy("ASK_USER")
+
+    decision = Orchestrator(
+        policy_engine=policy,
+        agent_manager=agent_manager,
+        project_manager=FakeProjectManager(),
+    ).execute_route("delete generated files", ContinueRoute(), "demo")
+
+    assert decision.action == "ASK_USER"
+    assert decision.agent_id == "ag-001"
+    assert agent_manager.sent == []
+    assert policy.calls[0][1]["route_type"] == "CONTINUE_AGENT"
 
 
 def test_orchestrator_keeps_failed_start_project_owned_and_does_not_send() -> None:
@@ -372,3 +416,12 @@ def test_orchestrator_decision_mapping_is_explicit() -> None:
     assert map_orchestrator_decision(type("Decision", (), {"action": "TEMPORARY_FAILURE"})()) == DispatchDecision.REQUEUE
     assert map_orchestrator_decision(type("Decision", (), {"action": "RETRY"})()) == DispatchDecision.REQUEUE
     assert map_orchestrator_decision(type("Decision", (), {"action": "REQUEUE"})()) == DispatchDecision.REQUEUE
+
+
+def test_orchestrator_cli_exit_codes_distinguish_success_park_and_failure() -> None:
+    assert exit_code_for_output(OrchestratorDecision("START_AGENT", "ok"), command="master-request") == 0
+    assert exit_code_for_output(OrchestratorDecision("PARK", "needs human"), command="master-request") == 2
+    assert exit_code_for_output(OrchestratorDecision("ASK_USER", "needs approval"), command="master-request") == 2
+    assert exit_code_for_output(OrchestratorDecision("DENY", "blocked"), command="master-request") == 1
+    assert exit_code_for_output(OrchestratorDecision("MASTER_FAILED", "provider failed"), command="master-request") == 1
+    assert exit_code_for_output(type("Dispatch", (), {"decision": "PARK", "error": None})(), command="dispatch") == 0

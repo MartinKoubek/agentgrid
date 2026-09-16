@@ -36,8 +36,8 @@ def test_master_launcher_fake_once_registers_and_delegates(tmp_path: Path) -> No
     ]
     try:
         result = subprocess.run(launcher_args + ["--once", "Read README.md"], capture_output=True, text=True, timeout=90)
-        if "Device not configured" in result.stderr:
-            pytest.skip(f"tmux cannot allocate a test pane: {result.stderr.strip()}")
+        if "Device not configured" in result.stdout or "Device not configured" in result.stderr:
+            pytest.skip(f"tmux cannot allocate a test pane: {(result.stderr or result.stdout).strip()}")
         assert result.returncode == 0, result.stderr
         decision = json.loads(result.stdout)
         assert decision["action"] == "START_AGENT"
@@ -60,5 +60,70 @@ def test_master_launcher_fake_once_registers_and_delegates(tmp_path: Path) -> No
         second = json.loads(again.stdout)
         assert second["project_id"] == project_id
         assert second["agent_id"] != decision["agent_id"]
+    finally:
+        subprocess.run(["tmux", "-L", socket, "kill-server"], capture_output=True, check=False, timeout=10)
+
+
+def test_master_launcher_defaults_to_git_root_from_subdirectory(tmp_path: Path) -> None:
+    if shutil.which("tmux") is None or shutil.which("python3.11") is None or shutil.which("git") is None:
+        pytest.skip("tmux, python3.11, and git are needed for the launcher git-root test")
+    project = tmp_path / "repo root"
+    nested = project / "src" / "pkg"
+    nested.mkdir(parents=True)
+    subprocess.run(["git", "init", str(project)], capture_output=True, text=True, check=True, timeout=30)
+    runtime = tmp_path / "runtime"
+    socket = f"agentgrid-launcher-root-{uuid.uuid4().hex}"
+    try:
+        result = subprocess.run(
+            [
+                "bash", str(LAUNCHER), "--fake",
+                "--runtime-root", str(runtime), "--socket-name", socket,
+                "--once", "Read the repo root",
+            ],
+            cwd=nested,
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        if "Device not configured" in result.stdout or "Device not configured" in result.stderr:
+            pytest.skip(f"tmux cannot allocate a test pane: {(result.stderr or result.stdout).strip()}")
+        assert result.returncode == 0, result.stderr
+        decision = json.loads(result.stdout)
+        assert decision["project_id"].startswith("repo-root-")
+    finally:
+        subprocess.run(["tmux", "-L", socket, "kill-server"], capture_output=True, check=False, timeout=10)
+
+
+def test_master_launcher_once_returns_nonzero_for_policy_denial(tmp_path: Path) -> None:
+    if shutil.which("tmux") is None or shutil.which("python3.11") is None:
+        pytest.skip("tmux and python3.11 are needed for the launcher policy test")
+    project = tmp_path / "policy project"
+    project.mkdir()
+    runtime = tmp_path / "runtime"
+    socket = f"agentgrid-launcher-policy-{uuid.uuid4().hex}"
+    try:
+        result = subprocess.run(
+            [
+                "bash", str(LAUNCHER), "--fake", "--project", str(project),
+                "--runtime-root", str(runtime), "--socket-name", socket,
+                "--once", "force-push protected branch",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        if "Device not configured" in result.stdout or "Device not configured" in result.stderr:
+            pytest.skip(f"tmux cannot allocate a test pane: {(result.stderr or result.stdout).strip()}")
+        assert result.returncode == 1
+        decision = json.loads(result.stdout)
+        assert decision["action"] == "DENY"
+
+        history = subprocess.run(
+            [str(ORCHESTRATOR), "--runtime-root", str(runtime), "--socket-name", socket,
+             "master-history", "--json"], capture_output=True, text=True, timeout=30,
+        )
+        assert history.returncode == 0, history.stderr
+        records = json.loads(history.stdout)
+        assert records[0]["status"] == "FAILED"
     finally:
         subprocess.run(["tmux", "-L", socket, "kill-server"], capture_output=True, check=False, timeout=10)

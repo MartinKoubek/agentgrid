@@ -5,10 +5,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 python="${PYTHON:-python3.11}"
 project_input="$PWD"
-runtime_root="${AGENTGRID_RUNTIME_ROOT:-${XDG_STATE_HOME:-$HOME/.local/state}/agentgrid/master}"
+project_override=0
+runtime_root="${AGENTGRID_RUNTIME_ROOT:-}"
 socket="${AGENTGRID_SOCKET_NAME:-agentgrid-master-$(id -u)}"
 provider=codex
 once=""
+last_status="UNKNOWN"
 
 usage() {
   cat <<'EOF'
@@ -29,7 +31,7 @@ while [[ $# -gt 0 ]]; do
       option="$1"; shift
       if [[ $# -eq 0 ]]; then echo "Missing argument for $option" >&2; exit 2; fi
       case "$option" in
-        -p|--project) project_input="$1" ;;
+        -p|--project) project_input="$1"; project_override=1 ;;
         --runtime-root) runtime_root="$1" ;;
         --socket-name) socket="$1" ;;
         --once) once="$1" ;;
@@ -41,6 +43,18 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+if [[ "$project_override" -eq 0 ]] && command -v git >/dev/null 2>&1; then
+  git_root="$(git -C "$project_input" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [[ -n "$git_root" ]]; then project_input="$git_root"; fi
+fi
+if [[ -z "$runtime_root" ]]; then
+  if [[ "$provider" == fake ]]; then
+    runtime_root="${XDG_STATE_HOME:-$HOME/.local/state}/agentgrid/master-fake"
+  else
+    runtime_root="${XDG_STATE_HOME:-$HOME/.local/state}/agentgrid/master-codex"
+  fi
+fi
+
 for executable in "$python" tmux; do
   if ! command -v "$executable" >/dev/null 2>&1; then
     echo "Required executable not found: $executable" >&2; exit 1
@@ -51,6 +65,8 @@ if [[ "$provider" == codex ]]; then
     echo "Codex CLI is missing. Install/login to Codex, or use --fake to test the launcher." >&2; exit 1
   fi
   if ! codex --version >/dev/null; then echo "Codex CLI is not working" >&2; exit 1; fi
+  echo "Codex CLI version: $(codex --version 2>/dev/null)" >&2
+  echo "Codex authentication readiness cannot be checked reliably by this launcher; real provider failures will be reported explicitly." >&2
 fi
 if [[ ! -d "$project_input" ]]; then echo "Project directory does not exist: $project_input" >&2; exit 1; fi
 project_path="$(cd "$project_input" && pwd -P)"
@@ -66,31 +82,60 @@ ag() {
 agent() {
   "$repo_root/bin/agentgrid-agent" --registry "$runtime_root/agents.sqlite3" --socket-name "$socket" "$@"
 }
+json_field() {
+  "$python" -c 'import json,sys; data=json.load(sys.stdin); print(data.get(sys.argv[1], ""))' "$1"
+}
+summarize_decision() {
+  "$python" -c '
+import json,sys
+data=json.load(sys.stdin)
+action=data.get("action", "UNKNOWN")
+project=data.get("project_id") or "-"
+agent=data.get("agent_id") or "-"
+details=data.get("details") or {}
+request_id=details.get("request_id") or "-"
+reason=data.get("reason") or ""
+print(f"{action}: project={project} agent={agent} request={request_id} {reason}".strip())
+'
+}
 scan_once() {
-  local output i
+  local output i delivered decision
   if ! output="$(ag scan --json 2>&1)"; then printf 'scan failed: %s\n' "$output" >>"$monitor_log"; return 1; fi
   if [[ "$output" != '[]' ]]; then printf 'scan: %s\n' "$output" >>"$monitor_log"; fi
   for i in 1 2 3 4 5 6 7 8 9 10; do
     if ! output="$(ag dispatch --json 2>&1)"; then printf 'dispatch failed: %s\n' "$output" >>"$monitor_log"; return 1; fi
-    if [[ "$output" == *'"delivered": false'* ]]; then break; fi
+    delivered="$(printf '%s' "$output" | json_field delivered 2>/dev/null || printf unknown)"
+    decision="$(printf '%s' "$output" | json_field decision 2>/dev/null || printf unknown)"
+    if [[ "$delivered" == False || "$delivered" == false ]]; then break; fi
     printf 'dispatch: %s\n' "$output" >>"$monitor_log"
-    if [[ "$output" == *'"REQUEUE"'* ]]; then break; fi
+    if [[ "$decision" == "REQUEUE" || "$decision" == "PARK" ]]; then break; fi
   done
 }
 request() {
   local text="$1"; shift
-  local request_id
+  local request_id output status
   request_id="mr-$("$python" -c 'import uuid;print(uuid.uuid4().hex)')"
-  ag master-request "$text" --project-id "$project_id" --request-id "$request_id" "$@" --json
+  set +e
+  output="$(ag master-request "$text" --project-id "$project_id" --request-id "$request_id" "$@" --json)"
+  status=$?
+  set -e
+  printf '%s\n' "$output"
+  last_status="$(printf '%s' "$output" | json_field action 2>/dev/null || printf UNKNOWN)"
+  printf '%s\n' "$output" | summarize_decision >&2 || true
+  return "$status"
 }
 
 # Idempotent project registration; do not create a repository or touch its files.
 ag open-project "$project_id" --path "$project_path" --json >/dev/null
 
 if [[ -n "$once" ]]; then
+  set +e
   request "$once"
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]]; then exit "$status"; fi
   scan_once || echo "Monitor/dispatcher error; inspect $monitor_log" >&2
-  exit 0
+  exit "$status"
 fi
 
 # Only the observer runs in the background. The Master itself runs per request,
@@ -101,12 +146,16 @@ watch_pid=$!
 trap 'kill "$watch_pid" 2>/dev/null || true; wait "$watch_pid" 2>/dev/null || true' EXIT
 
 cat <<EOF
-AgentGrid Master ($provider) — project $project_id
+AgentGrid Master ($provider) - project $project_id
 Project: $project_path
 Runtime: $runtime_root
 Tmux socket: $socket
+Monitor log: $monitor_log
 Enter a request, or /help for controls. Existing workers stay alive on /quit.
 EOF
+
+echo "Current workers:" >&2
+agent list --json >&2 || echo "Unable to list workers yet." >&2
 
 while true; do
   if ! IFS= read -r -p 'master> ' line; then printf '\n'; break; fi
@@ -137,13 +186,13 @@ EOF
     /continue\ *)
       if [[ -z "${line#/continue }" ]]; then echo 'Provide a request after /continue.'; continue; fi
       if IFS= read -r -p 'Have you checked the existing worker is ready? Type YES: ' answer && [[ "$answer" == YES ]]; then
-        request "${line#/continue }" --allow-continue || echo 'Master request failed; inspect the result above.' >&2
+        request "${line#/continue }" --allow-continue || echo 'Master request parked or failed; inspect the result above.' >&2
       else
         echo 'Not sent.'
       fi
       ;;
     /*) echo 'Unknown command. Type /help.' ;;
-    *) request "$line" || echo 'Master request failed; inspect the result above.' >&2 ;;
+    *) request "$line" || echo 'Master request parked or failed; inspect the result above.' >&2 ;;
   esac
 done
 

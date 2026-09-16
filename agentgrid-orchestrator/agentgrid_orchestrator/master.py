@@ -423,7 +423,7 @@ def parse_master_decision(output: str) -> MasterDecision:
 def _status_for_result(result: OrchestratorDecision) -> str:
     if result.action in {"ASK_USER", "PARK", "AGENT_START_FAILED", "AGENT_SEND_FAILED", "MASTER_DECISION_REJECTED"}:
         return "PARKED"
-    if result.action == "MASTER_FAILED":
+    if result.action in {"DENY", "MASTER_FAILED"}:
         return "FAILED"
     return "EXECUTED"
 

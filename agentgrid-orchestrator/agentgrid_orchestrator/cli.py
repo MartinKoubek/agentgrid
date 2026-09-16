@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         orchestrator = Orchestrator()
         output = orchestrator.handle_request(args.text, args.project_id) if args.command == "request" else orchestrator.handle_event(json.loads(args.event_json))
     print(json.dumps(to_jsonable(output), indent=2 if args.json else None, sort_keys=not args.json))
-    return 0
+    return exit_code_for_output(output, command=args.command)
 
 
 def to_jsonable(value: object) -> object:
@@ -72,6 +72,41 @@ def to_jsonable(value: object) -> object:
     if isinstance(value, dict):
         return {key: to_jsonable(item) for key, item in value.items()}
     return value
+
+
+def exit_code_for_output(value: object, command: str | None = None) -> int:
+    if command in {"scan", "dispatch", "master-history", "open-project"}:
+        error = getattr(value, "error", None)
+        return 1 if error else 0
+    action = _action_for_output(value)
+    if action in {"ASK_USER", "PARK", "AGENT_WAITING_INPUT", "WAITING_USER"}:
+        return 2
+    if action in {
+        "DENY",
+        "MASTER_FAILED",
+        "MASTER_DECISION_REJECTED",
+        "AGENT_START_FAILED",
+        "AGENT_SEND_FAILED",
+        "AGENT_FAILED",
+        "TEMPORARY_FAILURE",
+        "REQUEUE",
+        "RETRY",
+    }:
+        return 1
+    error = getattr(value, "error", None)
+    if error:
+        return 1
+    return 0
+
+
+def _action_for_output(value: object) -> str | None:
+    action = getattr(value, "action", None)
+    if action is not None:
+        return str(action)
+    if isinstance(value, dict):
+        action = value.get("action") or value.get("decision")
+        return str(action) if action is not None else None
+    return None
 
 
 if __name__ == "__main__": raise SystemExit(main())

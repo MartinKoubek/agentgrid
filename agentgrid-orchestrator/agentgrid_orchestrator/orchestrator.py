@@ -26,19 +26,32 @@ class Orchestrator:
         target_project_id = project_id or "default"
         context = self._context(target_project_id, request)
         route = self.router.route(request, context) if self.router else None
-        policy = self.policy_engine.decide("delegate user request", {"request": request}) if self.policy_engine else "ALLOW"
-        policy_value = getattr(policy, "value", policy)
-        if policy_value == "DENY":
-            return OrchestratorDecision("DENY", "policy denied request", project_id=target_project_id)
-        if policy_value == "ASK_USER":
-            return OrchestratorDecision("ASK_USER", "policy requires user approval", project_id=target_project_id)
+        policy_decision = self._policy_decision(request, target_project_id)
+        if policy_decision is not None:
+            return policy_decision
         if route is None:
             return OrchestratorDecision("NOOP", "no router configured", project_id=target_project_id)
-        return self.execute_route(request, route, target_project_id)
+        return self.execute_route(request, route, target_project_id, enforce_policy=False)
 
-    def execute_route(self, request: str, route, target_project_id: str | None = None) -> OrchestratorDecision:
+    def execute_route(
+        self,
+        request: str,
+        route,
+        target_project_id: str | None = None,
+        enforce_policy: bool = True,
+    ) -> OrchestratorDecision:
         target_project_id = target_project_id or getattr(route, "project_id", None) or "default"
         route_type = getattr(route.route, "value", route.route)
+
+        if enforce_policy:
+            policy_decision = self._policy_decision(
+                request,
+                target_project_id,
+                route_type=route_type,
+                agent_id=getattr(route, "agent_id", None),
+            )
+            if policy_decision is not None:
+                return policy_decision
 
         if route_type == "CONTINUE_AGENT" and route.agent_id:
             if self.agent_manager:
@@ -230,6 +243,40 @@ class Orchestrator:
             return {"project_id": project_id, "agents": []}
         context = self.context_builder.get_context(project_id, query=request, level="summary")
         return context.to_dict() if hasattr(context, "to_dict") else dict(context)
+
+    def _policy_decision(
+        self,
+        request: str,
+        project_id: str,
+        route_type: str | None = None,
+        agent_id: str | None = None,
+    ) -> OrchestratorDecision | None:
+        if not self.policy_engine:
+            return None
+        details = {"request": request, "project_id": project_id}
+        if route_type is not None:
+            details["route_type"] = route_type
+        if agent_id is not None:
+            details["agent_id"] = agent_id
+        policy = self.policy_engine.decide("delegate user request", details)
+        policy_value = getattr(policy, "value", policy)
+        if policy_value == "DENY":
+            return OrchestratorDecision(
+                "DENY",
+                "policy denied request",
+                project_id=project_id,
+                agent_id=agent_id,
+                details={"request": request, "route_type": route_type},
+            )
+        if policy_value == "ASK_USER":
+            return OrchestratorDecision(
+                "ASK_USER",
+                "policy requires user approval",
+                project_id=project_id,
+                agent_id=agent_id,
+                details={"request": request, "route_type": route_type},
+            )
+        return None
 
     def _attach_agent(self, project_id: str, agent_id: str, request: str) -> str | None:
         if not self.project_manager:
