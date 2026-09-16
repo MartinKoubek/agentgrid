@@ -30,7 +30,7 @@ def paste_text(client, pane_id: str, text: str, bracketed: bool = True) -> None:
             temp_path = temp_file.name
         client.run(["load-buffer", "-b", buffer_name, temp_path])
         Path(temp_path).unlink(missing_ok=True)
-        args = ["paste-buffer", "-d", "-b", buffer_name, "-t", pane_id]
+        args = ["paste-buffer", "-r", "-d", "-b", buffer_name, "-t", pane_id]
         if bracketed:
             args.insert(1, "-p")
         client.run(args)

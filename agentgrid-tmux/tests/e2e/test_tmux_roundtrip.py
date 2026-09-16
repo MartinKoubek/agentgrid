@@ -222,7 +222,7 @@ try:
         if not chunk:
             break
         data.extend(chunk)
-        if data.endswith(b"\r"):
+        if data.endswith(b"\x1b[201~\r"):
             break
 finally:
     sys.stdout.write("\x1b[?2004l")
@@ -232,7 +232,7 @@ finally:
         output_file.write(bytes(data))
     print("RECORDER_DONE", flush=True)
 """.strip()
-    assert 'data.endswith(b"\\r")' in recorder_source
+    assert 'data.endswith(b"\\x1b[201~\\r")' in recorder_source
     recorder_path.write_text(recorder_source, encoding="utf-8")
     prompt = "First paragraph with café.\n\nSecond paragraph: $(rm -rf /) && echo '$PATH' * ?"
 
@@ -256,6 +256,8 @@ finally:
 
         received = output_path.read_bytes()
         prompt_bytes = prompt.encode("utf-8")
+        expected = b"\x1b[200~" + prompt_bytes + b"\x1b[201~\r"
+        assert received == expected
         assert received.count(prompt_bytes) == 1
         assert received.startswith(b"\x1b[200~")
         assert prompt_bytes in received

@@ -38,8 +38,47 @@ class Orchestrator:
 
         if route_type == "CONTINUE_AGENT" and route.agent_id:
             if self.agent_manager:
-                self.agent_manager.send(route.agent_id, request)
-                self._remember_agent_task(route.project_id or target_project_id, route.agent_id, request)
+                route_project_id = route.project_id or target_project_id
+                attempt_error = self._remember_agent_attempt(route_project_id, route.agent_id, request)
+                if attempt_error is not None:
+                    return OrchestratorDecision(
+                        "AGENT_SEND_FAILED",
+                        "continuation agent task attempt could not be recorded",
+                        project_id=route_project_id,
+                        agent_id=route.agent_id,
+                        details={
+                            "request": request,
+                            "error": attempt_error,
+                            "delivery_uncertain": False,
+                        },
+                    )
+                try:
+                    self.agent_manager.send(route.agent_id, request)
+                except Exception as exc:
+                    return OrchestratorDecision(
+                        "AGENT_SEND_FAILED",
+                        "continuation agent prompt failed",
+                        project_id=route_project_id,
+                        agent_id=route.agent_id,
+                        details={
+                            "request": request,
+                            "error": str(exc),
+                            "delivery_uncertain": True,
+                        },
+                    )
+                task_error = self._remember_agent_task(route_project_id, route.agent_id, request)
+                if task_error is not None:
+                    return OrchestratorDecision(
+                        "AGENT_SEND_FAILED",
+                        "continuation agent task delivery could not be recorded",
+                        project_id=route_project_id,
+                        agent_id=route.agent_id,
+                        details={
+                            "request": request,
+                            "error": task_error,
+                            "delivery_uncertain": True,
+                        },
+                    )
             return OrchestratorDecision(
                 route_type,
                 route.reason,
@@ -52,14 +91,37 @@ class Orchestrator:
             if not self.agent_manager:
                 return OrchestratorDecision(route_type, route.reason, project_id=route.project_id or target_project_id)
             route_project_id = route.project_id or target_project_id
+            project, project_error = self._project(route_project_id)
+            if project_error is not None:
+                return OrchestratorDecision(
+                    "AGENT_START_FAILED",
+                    "project is unavailable for agent startup",
+                    project_id=route_project_id,
+                    details={"request": request, "error": project_error},
+                )
             agent = self.agent_manager.start(
                 adapter=self.agent_adapter,
                 session=self.agent_session,
-                cwd=self._project_path(route_project_id),
+                cwd=getattr(project, "path", None),
             )
             association_error = self._attach_agent(route_project_id, agent.id, request)
             agent_state = _state_value(getattr(agent, "state", None))
             agent_error = getattr(agent, "error", None)
+            if association_error is not None:
+                cleanup = self._cleanup_unassociated_agent(agent.id)
+                return OrchestratorDecision(
+                    "AGENT_START_FAILED",
+                    "agent project association failed",
+                    project_id=route_project_id,
+                    agent_id=agent.id,
+                    details={
+                        "request": request,
+                        "agent_state": agent_state,
+                        "error": association_error,
+                        "project_association_error": association_error,
+                        "cleanup": cleanup,
+                    },
+                )
             if agent_state == "FAILED":
                 return OrchestratorDecision(
                     "AGENT_START_FAILED",
@@ -85,6 +147,7 @@ class Orchestrator:
                         "request": request,
                         "error": str(exc),
                         "project_association_error": association_error,
+                        "delivery_uncertain": True,
                     },
                 )
             return OrchestratorDecision(
@@ -169,13 +232,39 @@ class Orchestrator:
             return "project manager is not configured"
         try:
             project = self.project_manager.get_project(project_id)
+            project.add_agent(agent_id)
+            project.config.setdefault("agent_tasks", {})[agent_id] = request
+            project.touch()
+            self.project_manager.save(project)
         except Exception as exc:
             return f"project association failed: {exc}"
-        project.add_agent(agent_id)
-        project.config.setdefault("agent_tasks", {})[agent_id] = request
-        project.touch()
-        self.project_manager.save(project)
         return None
+
+    def _cleanup_unassociated_agent(self, agent_id: str) -> dict[str, object]:
+        if not self.agent_manager:
+            return {"attempted": False, "error": "agent manager is not configured"}
+        result: dict[str, object] = {"attempted": True}
+        try:
+            stopped = self.agent_manager.stop(agent_id)
+            result["state"] = _state_value(getattr(stopped, "state", None))
+        except Exception as exc:
+            result["stop_error"] = str(exc)
+        try:
+            result["alive"] = bool(self.agent_manager.is_alive(agent_id))
+        except Exception as exc:
+            result["liveness_error"] = str(exc)
+            result["alive"] = "unknown"
+        if result.get("alive") is True:
+            result["orphan_risk"] = True
+        return result
+
+    def _project(self, project_id: str):
+        if not self.project_manager:
+            return None, "project manager is not configured"
+        try:
+            return self.project_manager.get_project(project_id), None
+        except Exception as exc:
+            return None, f"project lookup failed: {exc}"
 
     def _project_path(self, project_id: str) -> str | None:
         if not self.project_manager:
@@ -186,19 +275,35 @@ class Orchestrator:
             return None
         return getattr(project, "path", None)
 
-    def _remember_agent_task(self, project_id: str, agent_id: str, request: str) -> None:
+    def _remember_agent_task(self, project_id: str, agent_id: str, request: str) -> str | None:
         if not self.project_manager:
-            return
+            return "project manager is not configured"
         try:
             project = self.project_manager.get_project(project_id)
-        except Exception:
-            return
-        project.add_agent(agent_id)
-        existing = str(project.config.setdefault("agent_tasks", {}).get(agent_id, ""))
-        if request not in existing:
-            project.config["agent_tasks"][agent_id] = f"{existing}\n{request}".strip()
-        project.touch()
-        self.project_manager.save(project)
+            project.add_agent(agent_id)
+            existing = str(project.config.setdefault("agent_tasks", {}).get(agent_id, ""))
+            if request not in existing:
+                project.config["agent_tasks"][agent_id] = f"{existing}\n{request}".strip()
+            project.touch()
+            self.project_manager.save(project)
+        except Exception as exc:
+            return f"agent task persistence failed: {exc}"
+        return None
+
+    def _remember_agent_attempt(self, project_id: str, agent_id: str, request: str) -> str | None:
+        if not self.project_manager:
+            return "project manager is not configured"
+        try:
+            project = self.project_manager.get_project(project_id)
+            attempts = project.config.setdefault("agent_task_attempts", {})
+            agent_attempts = attempts.setdefault(agent_id, [])
+            if request not in agent_attempts:
+                agent_attempts.append(request)
+            project.touch()
+            self.project_manager.save(project)
+        except Exception as exc:
+            return f"agent task attempt persistence failed: {exc}"
+        return None
 
     def _agent_runtime_state(self, agent_id: str | None) -> str | None:
         if not agent_id or not self.agent_manager:

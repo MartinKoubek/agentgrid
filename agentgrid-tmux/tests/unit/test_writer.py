@@ -111,7 +111,7 @@ def test_paste_text_uses_unique_buffer_and_bracketed_paste(monkeypatch, tmp_path
 
     assert client.commands == [
         ["load-buffer", "-b", "agentgrid-paste-abc123", str(temp_path)],
-        ["paste-buffer", "-p", "-d", "-b", "agentgrid-paste-abc123", "-t", "%17"],
+        ["paste-buffer", "-p", "-r", "-d", "-b", "agentgrid-paste-abc123", "-t", "%17"],
         ["delete-buffer", "-b", "agentgrid-paste-abc123"],
     ]
     assert not temp_path.exists()

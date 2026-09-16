@@ -17,6 +17,18 @@ class FakeRouter:
         return FakeRoute()
 
 
+class ContinueRoute:
+    route = "CONTINUE_AGENT"
+    reason = "related request"
+    project_id = "demo"
+    agent_id = "ag-001"
+
+
+class ContinueRouter:
+    def route(self, request, context):
+        return ContinueRoute()
+
+
 class FakePolicy:
     def decide(self, action, details=None):
         return "ALLOW"
@@ -49,11 +61,20 @@ class FakeProjectManager:
 
 
 class RecordingAgentManager:
-    def __init__(self, agent=None, send_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        agent=None,
+        send_error: Exception | None = None,
+        stop_error: Exception | None = None,
+        alive: bool = False,
+    ) -> None:
         self.started = []
         self.sent = []
+        self.stopped = []
         self.agent = agent or type("Agent", (), {"id": "ag-001"})()
         self.send_error = send_error
+        self.stop_error = stop_error
+        self.alive = alive
 
     def start(self, **kwargs):
         self.started.append(kwargs)
@@ -63,6 +84,15 @@ class RecordingAgentManager:
         if self.send_error:
             raise self.send_error
         self.sent.append((agent_id, text))
+
+    def stop(self, agent_id):
+        self.stopped.append(agent_id)
+        if self.stop_error:
+            raise self.stop_error
+        return type("Agent", (), {"id": agent_id, "state": "STOPPED"})()
+
+    def is_alive(self, agent_id):
+        return self.alive
 
 
 def test_orchestrator_delegates_routing_and_policy() -> None:
@@ -127,26 +157,131 @@ def test_orchestrator_retains_agent_ownership_when_initial_send_fails() -> None:
     assert decision.action == "AGENT_SEND_FAILED"
     assert decision.agent_id == "ag-001"
     assert decision.details["error"] == "send boom"
+    assert decision.details["delivery_uncertain"] is True
     assert project_manager.project.agents == ["ag-001"]
     assert project_manager.project.config["agent_tasks"] == {"ag-001": "fix bug"}
 
 
-def test_orchestrator_reports_missing_project_association_for_failed_start() -> None:
+def test_orchestrator_missing_project_preflight_does_not_start_worker() -> None:
     class MissingProjectManager(FakeProjectManager):
         def get_project(self, project_id):
             raise KeyError(project_id)
 
-    failed_agent = type("Agent", (), {"id": "ag-001", "state": "FAILED", "error": "startup boom"})()
+    agent_manager = RecordingAgentManager()
     decision = Orchestrator(
         router=FakeRouter(),
         policy_engine=FakePolicy(),
-        agent_manager=RecordingAgentManager(agent=failed_agent),
+        agent_manager=agent_manager,
         project_manager=MissingProjectManager(),
     ).handle_request("fix bug", "missing")
 
     assert decision.action == "AGENT_START_FAILED"
     assert decision.project_id == "demo"
-    assert "project association failed" in decision.details["project_association_error"]
+    assert "project lookup failed" in decision.details["error"]
+    assert agent_manager.started == []
+    assert agent_manager.sent == []
+
+
+def test_orchestrator_project_save_failure_after_allocation_cleans_unassociated_worker() -> None:
+    class SaveFailingProjectManager(FakeProjectManager):
+        def save(self, project):
+            raise RuntimeError("save boom")
+
+    agent_manager = RecordingAgentManager()
+
+    decision = Orchestrator(
+        router=FakeRouter(),
+        policy_engine=FakePolicy(),
+        agent_manager=agent_manager,
+        project_manager=SaveFailingProjectManager(),
+    ).handle_request("fix bug", "demo")
+
+    assert decision.action == "AGENT_START_FAILED"
+    assert decision.agent_id == "ag-001"
+    assert "save boom" in decision.details["project_association_error"]
+    assert agent_manager.sent == []
+    assert agent_manager.stopped == ["ag-001"]
+    assert decision.details["cleanup"] == {"attempted": True, "state": "STOPPED", "alive": False}
+
+
+def test_orchestrator_reports_orphan_risk_when_association_cleanup_leaves_worker_alive() -> None:
+    class SaveFailingProjectManager(FakeProjectManager):
+        def save(self, project):
+            raise RuntimeError("save boom")
+
+    agent_manager = RecordingAgentManager(alive=True)
+
+    decision = Orchestrator(
+        router=FakeRouter(),
+        policy_engine=FakePolicy(),
+        agent_manager=agent_manager,
+        project_manager=SaveFailingProjectManager(),
+    ).handle_request("fix bug", "demo")
+
+    assert decision.action == "AGENT_START_FAILED"
+    assert decision.details["cleanup"]["alive"] is True
+    assert decision.details["cleanup"]["orphan_risk"] is True
+    assert agent_manager.sent == []
+
+
+def test_orchestrator_reports_cleanup_exception_after_association_failure() -> None:
+    class SaveFailingProjectManager(FakeProjectManager):
+        def save(self, project):
+            raise RuntimeError("save boom")
+
+    agent_manager = RecordingAgentManager(stop_error=RuntimeError("stop boom"))
+
+    decision = Orchestrator(
+        router=FakeRouter(),
+        policy_engine=FakePolicy(),
+        agent_manager=agent_manager,
+        project_manager=SaveFailingProjectManager(),
+    ).handle_request("fix bug", "demo")
+
+    assert decision.action == "AGENT_START_FAILED"
+    assert decision.details["cleanup"]["stop_error"] == "stop boom"
+    assert decision.details["cleanup"]["alive"] is False
+
+
+def test_orchestrator_continues_agent_and_records_task() -> None:
+    agent_manager = RecordingAgentManager()
+    project_manager = FakeProjectManager()
+    project_manager.project.add_agent("ag-001")
+    project_manager.project.config["agent_tasks"] = {"ag-001": "fix scheduler"}
+
+    decision = Orchestrator(
+        router=ContinueRouter(),
+        policy_engine=FakePolicy(),
+        agent_manager=agent_manager,
+        project_manager=project_manager,
+    ).handle_request("add scheduler test", "demo")
+
+    assert decision.action == "CONTINUE_AGENT"
+    assert decision.agent_id == "ag-001"
+    assert agent_manager.sent == [("ag-001", "add scheduler test")]
+    assert project_manager.project.config["agent_task_attempts"] == {"ag-001": ["add scheduler test"]}
+    assert project_manager.project.config["agent_tasks"] == {"ag-001": "fix scheduler\nadd scheduler test"}
+
+
+def test_orchestrator_parks_continue_send_failure_with_attempt_recorded() -> None:
+    agent_manager = RecordingAgentManager(send_error=RuntimeError("send boom"))
+    project_manager = FakeProjectManager()
+    project_manager.project.add_agent("ag-001")
+    project_manager.project.config["agent_tasks"] = {"ag-001": "fix scheduler"}
+
+    decision = Orchestrator(
+        router=ContinueRouter(),
+        policy_engine=FakePolicy(),
+        agent_manager=agent_manager,
+        project_manager=project_manager,
+    ).handle_request("add scheduler test", "demo")
+
+    assert decision.action == "AGENT_SEND_FAILED"
+    assert decision.agent_id == "ag-001"
+    assert decision.details["error"] == "send boom"
+    assert decision.details["delivery_uncertain"] is True
+    assert project_manager.project.config["agent_task_attempts"] == {"ag-001": ["add scheduler test"]}
+    assert project_manager.project.config["agent_tasks"] == {"ag-001": "fix scheduler"}
 
 
 def test_orchestrator_accepts_event() -> None:
