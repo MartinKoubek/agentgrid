@@ -36,3 +36,16 @@ def test_router_does_not_continue_stopped_agent() -> None:
 
     assert decision.route == RouteType.START_AGENT
     assert decision.agent_id is None
+
+
+def test_router_does_not_continue_failed_agent() -> None:
+    context = {
+        "project_id": "demo",
+        "project": {"id": "demo"},
+        "agents": [{"id": "ag-001", "state": "FAILED", "task": "scheduler"}],
+    }
+
+    decision = ContextRouter().route("add scheduler test", context)
+
+    assert decision.route == RouteType.START_AGENT
+    assert decision.agent_id is None

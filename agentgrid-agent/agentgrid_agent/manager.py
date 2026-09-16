@@ -96,6 +96,8 @@ class AgentManager:
             agent.mark(AgentState.FAILED, str(exc))
             try:
                 adapter_impl.stop(agent)
+                if adapter_impl.is_alive(agent):
+                    agent.error = f"{exc}; cleanup left worker running"
             except Exception as stop_exc:
                 agent.error = f"{exc}; cleanup failed: {stop_exc}"
         self.registry.save(agent)

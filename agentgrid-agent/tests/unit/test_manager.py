@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from tmuxio.models import HandshakeResult, Pane
 
+from agentgrid_agent.adapters.base import AgentAdapter
 from agentgrid_agent.adapters.fake import FakeAgentAdapter
 from agentgrid_agent.manager import AgentManager
-from agentgrid_agent.models import AgentState
+from agentgrid_agent.models import Agent, AgentConfig, AgentState
 from agentgrid_agent.registry import FileAgentRegistry
 
 
@@ -83,6 +84,33 @@ class DisappearingTmux(FakeTmux):
                 error="server exited unexpectedly",
             )
         return super().handshake(pane_id, active=active, expected_endpoint_id=expected_endpoint_id)
+
+
+class FailingStartAdapter(AgentAdapter):
+    name = "failing"
+
+    def __init__(self, tmux, stop_error: Exception | None = None) -> None:
+        self.tmux = tmux
+        self.stop_error = stop_error
+
+    def default_command(self) -> str:
+        return "python3.11 -c 'import time; time.sleep(30)'"
+
+    def start(self, pane, config: AgentConfig) -> None:
+        raise RuntimeError("startup boom")
+
+    def send(self, agent: Agent, text: str) -> None:
+        raise RuntimeError("send should not be called")
+
+    def read(self, agent: Agent) -> str:
+        return self.tmux.read(agent.pane_id)
+
+    def is_alive(self, agent: Agent) -> bool:
+        return self.tmux.handshake(agent.pane_id, active=True, expected_endpoint_id=agent.endpoint_id).agent_alive is True
+
+    def stop(self, agent: Agent) -> None:
+        if self.stop_error:
+            raise self.stop_error
 
 
 def test_manager_starts_sends_reads_and_stops_agent(tmp_path) -> None:
@@ -174,3 +202,31 @@ def test_manager_stop_marks_stopped_when_endpoint_disappears(tmp_path) -> None:
     stopped = manager.stop(agent.id)
 
     assert stopped.state == AgentState.STOPPED
+
+
+def test_manager_failed_start_reports_live_worker_after_cleanup(tmp_path) -> None:
+    tmux = FakeTmux()
+    manager = AgentManager(
+        tmux=tmux,
+        registry=FileAgentRegistry(tmp_path / "agents.sqlite3"),
+        adapters={"failing": FailingStartAdapter(tmux)},
+    )
+
+    agent = manager.start(adapter="failing")
+
+    assert agent.state == AgentState.FAILED
+    assert agent.error == "startup boom; cleanup left worker running"
+
+
+def test_manager_failed_start_reports_cleanup_exception(tmp_path) -> None:
+    tmux = FakeTmux()
+    manager = AgentManager(
+        tmux=tmux,
+        registry=FileAgentRegistry(tmp_path / "agents.sqlite3"),
+        adapters={"failing": FailingStartAdapter(tmux, stop_error=RuntimeError("stop boom"))},
+    )
+
+    agent = manager.start(adapter="failing")
+
+    assert agent.state == AgentState.FAILED
+    assert agent.error == "startup boom; cleanup failed: stop boom"

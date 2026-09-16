@@ -194,8 +194,7 @@ def test_tmux_paste_text_delivers_multiline_prompt_as_one_terminal_paste(tmp_pat
     client = TmuxClient(socket_name=socket_name)
     output_path = tmp_path / "received.bin"
     recorder_path = tmp_path / "recorder.py"
-    recorder_path.write_text(
-        """
+    recorder_source = r"""
 from __future__ import annotations
 
 import select
@@ -211,6 +210,8 @@ data = bytearray()
 
 try:
     tty.setraw(fd)
+    sys.stdout.write("\x1b[?2004h")
+    sys.stdout.flush()
     print("RECORDER_READY", flush=True)
     deadline = time.monotonic() + 5.0
     while time.monotonic() < deadline:
@@ -224,21 +225,31 @@ try:
         if data.endswith(b"\r"):
             break
 finally:
+    sys.stdout.write("\x1b[?2004l")
+    sys.stdout.flush()
     termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
     with open(output_path, "wb") as output_file:
         output_file.write(bytes(data))
     print("RECORDER_DONE", flush=True)
-""".strip(),
-        encoding="utf-8",
-    )
+""".strip()
+    assert 'data.endswith(b"\\r")' in recorder_source
+    recorder_path.write_text(recorder_source, encoding="utf-8")
     prompt = "First paragraph with café.\n\nSecond paragraph: $(rm -rf /) && echo '$PATH' * ?"
 
     try:
+        launch_command = (
+            f"python3.11 -u {quote(str(recorder_path))} {quote(str(output_path))}; "
+            "status=$?; echo RECORDER_EXIT:$status; sleep 30"
+        )
         pane = client.start_process(
-            f"python3.11 -u {quote(str(recorder_path))} {quote(str(output_path))}",
+            f"bash -lc {quote(launch_command)}",
             session="paste-recorder",
         )
-        wait_for_text(client, pane.pane_id, "RECORDER_READY")
+        try:
+            wait_for_text(client, pane.pane_id, "RECORDER_READY")
+        except (AssertionError, TmuxCommandError) as exc:
+            source = recorder_path.read_text(encoding="utf-8")
+            raise AssertionError(f"recorder did not become ready; source was:\n{source}") from exc
         client.paste_text(pane.pane_id, prompt)
         client.send_key(pane.pane_id, "ENTER")
         wait_for_text(client, pane.pane_id, "RECORDER_DONE")

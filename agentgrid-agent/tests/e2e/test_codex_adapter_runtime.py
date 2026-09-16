@@ -99,8 +99,10 @@ def test_real_codex_adapter_can_start_send_read_and_stop(tmp_path) -> None:
 
         first_marker = "AGENTGRID-CODEX-SMOKE-ONE"
         first_prompt = (
-            "Reply with exactly one line made from these five tokens joined by hyphens: "
-            "AGENTGRID CODEX SMOKE ONE. Do not include any other words."
+            "This is the first AgentGrid Codex smoke request.\n\n"
+            "Reply with exactly one line made from these five tokens joined by hyphens:\n"
+            "AGENTGRID CODEX SMOKE ONE\n\n"
+            "Do not include any other words."
         )
         assert first_marker not in first_prompt
         baseline = manager.read(agent.id)
@@ -112,8 +114,10 @@ def test_real_codex_adapter_can_start_send_read_and_stop(tmp_path) -> None:
 
         second_marker = "AGENTGRID-CODEX-SMOKE-TWO"
         second_prompt = (
-            "Now reply with exactly one line made from these five tokens joined by hyphens: "
-            "AGENTGRID CODEX SMOKE TWO. Do not include any other words."
+            "This is the second related AgentGrid Codex smoke request in the same session.\n\n"
+            "Reply with exactly one line made from these five tokens joined by hyphens:\n"
+            "AGENTGRID CODEX SMOKE TWO\n\n"
+            "Do not include any other words."
         )
         assert second_marker not in second_prompt
         baseline = manager.read(agent.id)

@@ -49,15 +49,19 @@ class FakeProjectManager:
 
 
 class RecordingAgentManager:
-    def __init__(self) -> None:
+    def __init__(self, agent=None, send_error: Exception | None = None) -> None:
         self.started = []
         self.sent = []
+        self.agent = agent or type("Agent", (), {"id": "ag-001"})()
+        self.send_error = send_error
 
     def start(self, **kwargs):
         self.started.append(kwargs)
-        return type("Agent", (), {"id": "ag-001"})()
+        return self.agent
 
     def send(self, agent_id, text):
+        if self.send_error:
+            raise self.send_error
         self.sent.append((agent_id, text))
 
 
@@ -84,6 +88,65 @@ def test_orchestrator_starts_agent_with_project_cwd() -> None:
         {"adapter": "codex", "session": "agentgrid-agents", "cwd": "/tmp/demo-project"}
     ]
     assert agent_manager.sent == [("ag-001", "fix bug")]
+    assert project_manager.project.agents == ["ag-001"]
+    assert project_manager.project.config["agent_tasks"] == {"ag-001": "fix bug"}
+
+
+def test_orchestrator_keeps_failed_start_project_owned_and_does_not_send() -> None:
+    failed_agent = type("Agent", (), {"id": "ag-001", "state": "FAILED", "error": "startup boom"})()
+    agent_manager = RecordingAgentManager(agent=failed_agent)
+    project_manager = FakeProjectManager()
+
+    decision = Orchestrator(
+        router=FakeRouter(),
+        policy_engine=FakePolicy(),
+        agent_manager=agent_manager,
+        project_manager=project_manager,
+    ).handle_request("fix bug", "demo")
+
+    assert decision.action == "AGENT_START_FAILED"
+    assert decision.project_id == "demo"
+    assert decision.agent_id == "ag-001"
+    assert decision.details["error"] == "startup boom"
+    assert agent_manager.sent == []
+    assert project_manager.project.agents == ["ag-001"]
+    assert project_manager.project.config["agent_tasks"] == {"ag-001": "fix bug"}
+
+
+def test_orchestrator_retains_agent_ownership_when_initial_send_fails() -> None:
+    agent_manager = RecordingAgentManager(send_error=RuntimeError("send boom"))
+    project_manager = FakeProjectManager()
+
+    decision = Orchestrator(
+        router=FakeRouter(),
+        policy_engine=FakePolicy(),
+        agent_manager=agent_manager,
+        project_manager=project_manager,
+    ).handle_request("fix bug", "demo")
+
+    assert decision.action == "AGENT_SEND_FAILED"
+    assert decision.agent_id == "ag-001"
+    assert decision.details["error"] == "send boom"
+    assert project_manager.project.agents == ["ag-001"]
+    assert project_manager.project.config["agent_tasks"] == {"ag-001": "fix bug"}
+
+
+def test_orchestrator_reports_missing_project_association_for_failed_start() -> None:
+    class MissingProjectManager(FakeProjectManager):
+        def get_project(self, project_id):
+            raise KeyError(project_id)
+
+    failed_agent = type("Agent", (), {"id": "ag-001", "state": "FAILED", "error": "startup boom"})()
+    decision = Orchestrator(
+        router=FakeRouter(),
+        policy_engine=FakePolicy(),
+        agent_manager=RecordingAgentManager(agent=failed_agent),
+        project_manager=MissingProjectManager(),
+    ).handle_request("fix bug", "missing")
+
+    assert decision.action == "AGENT_START_FAILED"
+    assert decision.project_id == "demo"
+    assert "project association failed" in decision.details["project_association_error"]
 
 
 def test_orchestrator_accepts_event() -> None:
@@ -164,6 +227,8 @@ def test_orchestrator_event_handler_maps_decisions(tmp_path) -> None:
 def test_orchestrator_decision_mapping_is_explicit() -> None:
     assert map_orchestrator_decision(type("Decision", (), {"action": "AGENT_STARTED"})()) == DispatchDecision.ACK
     assert map_orchestrator_decision(type("Decision", (), {"action": "AGENT_FAILED"})()) == DispatchDecision.PARK
+    assert map_orchestrator_decision(type("Decision", (), {"action": "AGENT_START_FAILED"})()) == DispatchDecision.PARK
+    assert map_orchestrator_decision(type("Decision", (), {"action": "AGENT_SEND_FAILED"})()) == DispatchDecision.PARK
     assert map_orchestrator_decision(type("Decision", (), {"action": "AGENT_OUTPUT_CHANGED"})()) == DispatchDecision.ACK
     assert map_orchestrator_decision(type("Decision", (), {"action": "AGENT_EXITED"})()) == DispatchDecision.ACK
     assert map_orchestrator_decision(type("Decision", (), {"action": "ASK_USER"})()) == DispatchDecision.PARK

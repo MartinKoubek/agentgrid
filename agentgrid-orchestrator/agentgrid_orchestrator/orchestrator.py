@@ -57,14 +57,42 @@ class Orchestrator:
                 session=self.agent_session,
                 cwd=self._project_path(route_project_id),
             )
-            self.agent_manager.send(agent.id, request)
-            self._attach_agent(route_project_id, agent.id, request)
+            association_error = self._attach_agent(route_project_id, agent.id, request)
+            agent_state = _state_value(getattr(agent, "state", None))
+            agent_error = getattr(agent, "error", None)
+            if agent_state == "FAILED":
+                return OrchestratorDecision(
+                    "AGENT_START_FAILED",
+                    "agent startup failed",
+                    project_id=route_project_id,
+                    agent_id=agent.id,
+                    details={
+                        "request": request,
+                        "agent_state": agent_state,
+                        "error": agent_error,
+                        "project_association_error": association_error,
+                    },
+                )
+            try:
+                self.agent_manager.send(agent.id, request)
+            except Exception as exc:
+                return OrchestratorDecision(
+                    "AGENT_SEND_FAILED",
+                    "initial agent prompt failed",
+                    project_id=route_project_id,
+                    agent_id=agent.id,
+                    details={
+                        "request": request,
+                        "error": str(exc),
+                        "project_association_error": association_error,
+                    },
+                )
             return OrchestratorDecision(
                 route_type,
                 route.reason,
                 project_id=route_project_id,
                 agent_id=agent.id,
-                details={"request": request},
+                details={"request": request, "project_association_error": association_error},
             )
 
         return OrchestratorDecision(route_type, route.reason, project_id=route.project_id, agent_id=route.agent_id)
@@ -136,17 +164,18 @@ class Orchestrator:
         context = self.context_builder.get_context(project_id, query=request, level="summary")
         return context.to_dict() if hasattr(context, "to_dict") else dict(context)
 
-    def _attach_agent(self, project_id: str, agent_id: str, request: str) -> None:
+    def _attach_agent(self, project_id: str, agent_id: str, request: str) -> str | None:
         if not self.project_manager:
-            return
+            return "project manager is not configured"
         try:
             project = self.project_manager.get_project(project_id)
-        except Exception:
-            return
+        except Exception as exc:
+            return f"project association failed: {exc}"
         project.add_agent(agent_id)
         project.config.setdefault("agent_tasks", {})[agent_id] = request
         project.touch()
         self.project_manager.save(project)
+        return None
 
     def _project_path(self, project_id: str) -> str | None:
         if not self.project_manager:
@@ -194,3 +223,7 @@ class Orchestrator:
 
 def _str_or_none(value: object) -> str | None:
     return str(value) if value is not None else None
+
+
+def _state_value(state: object) -> str | None:
+    return str(getattr(state, "value", state)) if state is not None else None
