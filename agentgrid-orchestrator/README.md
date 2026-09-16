@@ -10,7 +10,9 @@ It receives user requests or dispatched events, asks injected context and routin
 
 The runtime uses the deterministic `fake` agent adapter by default. It can also select the MVP `codex` adapter without changing Orchestrator or Router logic. Claude Code and other providers are not implemented yet.
 
-The Master workflow is an MVP planning layer on top of the same runtime. It asks a Master provider for a small validated routing decision, then executes that decision through the existing Orchestrator and Agent Manager. The deterministic `fake` Master provider is used for CI. The opt-in `codex` Master provider uses the local `codex exec` CLI with a JSON output schema and the versioned rules in `agentgrid_orchestrator/master_instructions.md`.
+The legacy Master workflow is an MVP planning API on top of the same runtime. It asks a Master provider for a small validated routing decision, then executes that decision through the existing Orchestrator and Agent Manager. The deterministic `fake` Master provider is used for CI. The opt-in `codex` Master provider uses the local `codex exec` CLI with a JSON output schema and the versioned rules in `agentgrid_orchestrator/master_instructions.md`.
+
+The supported human-facing Master UX is `bin/master_codex`: it starts or reattaches a persistent interactive Codex TUI in an AgentGrid-owned tmux session. That Master discovers `.agents/skills/agentgrid/SKILL.md` and uses the bundled helper script to inspect projects/workers and coordinate Codex worker panes.
 
 ## CLI
 
@@ -47,9 +49,21 @@ tmux -L agentgrid-demo kill-server
 
 Codex adapter V1 limitations: no semantic completion detection, no approval or waiting-input interpretation, no result extraction, and no autonomous build/test repair loop.
 
-## Master Codex MVP
+## Master Codex Launcher
 
-Prerequisites for a real Master Codex smoke run:
+For the current supervised interactive UX, prefer:
+
+```sh
+export PATH="/absolute/path/to/agentgrid/bin:$PATH"
+cd /path/to/project
+master_codex
+```
+
+The launcher registers the selected project, starts or reattaches `agentgrid-master:master`, starts an observer window, and leaves workers running when the user detaches from tmux. See `doc/master_codex.md` for status checks, fake one-shot tests, manual smoke steps, and limitations.
+
+## Legacy Master Planning API
+
+Prerequisites for the legacy `codex exec` Master API path:
 
 - Local `codex` CLI is installed and authenticated.
 - `tmux` can allocate panes on the machine.
@@ -129,4 +143,4 @@ tmux -L "$socket" kill-server
 rm -rf "$runtime"
 ```
 
-Known Master MVP limitations: no autonomous coding loop, no semantic Codex completion detection, no approval/waiting-input parser, no automatic retry of uncertain delivery, no real semantic router, and no provider other than the local Codex CLI for the real Master backend.
+Known legacy API limitations: no autonomous coding loop, no semantic Codex completion detection, no approval/waiting-input parser, no automatic retry of uncertain delivery, no real semantic router, and no provider other than the local Codex CLI for the real Master backend.

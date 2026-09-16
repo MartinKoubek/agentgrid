@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# One-command, supervised Master Codex launcher. Works with macOS's Bash 3.2.
+# One-command, supervised interactive Master Codex launcher. Works with macOS's Bash 3.2.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 python="${PYTHON:-python3.11}"
+codex="${CODEX:-codex}"
 project_input="$PWD"
 project_override=0
 runtime_root="${AGENTGRID_RUNTIME_ROOT:-}"
@@ -11,16 +12,17 @@ socket="${AGENTGRID_SOCKET_NAME:-agentgrid-master-$(id -u)}"
 provider=codex
 once=""
 last_status="UNKNOWN"
+show_status=0
 
 usage() {
   cat <<'EOF'
-Usage: master_codex [--project PATH] [--runtime-root DIR] [--socket-name NAME] [--fake] [--once "REQUEST"]
+Usage: master_codex [--project PATH] [--runtime-root DIR] [--socket-name NAME] [--fake] [--once "REQUEST"] [--status]
 
-From any project directory, run master_codex to open a supervised interactive
-Master session. The first run registers that directory as an AgentGrid project.
-Use --project PATH to choose another directory. --fake selects deterministic
-Master and worker adapters for a local test; otherwise both use real Codex.
-State and worker panes persist after you quit. See /help inside the session.
+From any project directory, run master_codex to start or reattach a dedicated
+interactive Codex Master TUI. The first run registers that directory as an
+AgentGrid project. Use --project PATH to choose another directory. --fake with
+--once keeps the deterministic legacy request path for tests. State and worker
+panes persist after you detach or quit Codex.
 EOF
 }
 
@@ -37,6 +39,7 @@ while [[ $# -gt 0 ]]; do
         --once) once="$1" ;;
       esac
       ;;
+    --status) show_status=1 ;;
     --fake) provider=fake ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -60,13 +63,18 @@ for executable in "$python" tmux; do
     echo "Required executable not found: $executable" >&2; exit 1
   fi
 done
-if [[ "$provider" == codex ]]; then
-  if ! command -v codex >/dev/null 2>&1; then
+if [[ "$provider" == codex && "$show_status" -eq 0 ]]; then
+  if ! command -v "$codex" >/dev/null 2>&1; then
     echo "Codex CLI is missing. Install/login to Codex, or use --fake to test the launcher." >&2; exit 1
   fi
-  if ! codex --version >/dev/null; then echo "Codex CLI is not working" >&2; exit 1; fi
-  echo "Codex CLI version: $(codex --version 2>/dev/null)" >&2
-  echo "Codex authentication readiness cannot be checked reliably by this launcher; real provider failures will be reported explicitly." >&2
+  if ! "$codex" --version >/dev/null; then echo "Codex CLI is not working" >&2; exit 1; fi
+  echo "Codex CLI version: $("$codex" --version 2>/dev/null)" >&2
+  if "$codex" doctor --summary --no-color --ascii >/dev/null 2>&1; then
+    echo "Codex doctor passed." >&2
+  else
+    echo "Codex doctor did not pass. Run 'codex doctor --summary --no-color --ascii' and fix authentication/configuration before a real Master session." >&2
+    exit 1
+  fi
 fi
 if [[ ! -d "$project_input" ]]; then echo "Project directory does not exist: $project_input" >&2; exit 1; fi
 project_path="$(cd "$project_input" && pwd -P)"
@@ -74,6 +82,18 @@ mkdir -p "$runtime_root"
 runtime_root="$(cd "$runtime_root" && pwd -P)"
 project_id="$("$python" -c 'import hashlib,re,sys; from pathlib import Path; p=Path(sys.argv[1]); name=re.sub("[^a-z0-9-]+", "-", p.name.lower()).strip("-") or "project"; print(name+"-"+hashlib.sha256(str(p).encode()).hexdigest()[:8])' "$project_path")"
 monitor_log="$runtime_root/monitor.log"
+master_session="agentgrid-master"
+master_window="master"
+observer_window="observer"
+bootstrap_prompt="$runtime_root/master-bootstrap.md"
+bootstrap_context="$runtime_root/master-bootstrap.json"
+observer_script="$runtime_root/master-observer.sh"
+agentgrid_skill="$repo_root/.agents/skills/agentgrid/SKILL.md"
+agentgrid_skill_script="$repo_root/.agents/skills/agentgrid/scripts/agentgrid.py"
+
+if [[ ! -f "$agentgrid_skill" || ! -x "$agentgrid_skill_script" ]]; then
+  echo "AgentGrid Codex skill is missing or not executable: $agentgrid_skill" >&2; exit 1
+fi
 
 ag() {
   "$repo_root/bin/agentgrid-orchestrator" --runtime-root "$runtime_root" --socket-name "$socket" \
@@ -128,6 +148,142 @@ request() {
 # Idempotent project registration; do not create a repository or touch its files.
 ag open-project "$project_id" --path "$project_path" --json >/dev/null
 
+write_bootstrap_files() {
+  "$python" - "$bootstrap_prompt" "$bootstrap_context" "$repo_root" "$project_path" "$project_id" "$runtime_root" "$socket" "$provider" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+prompt_path, context_path, repo_root, project_path, project_id, runtime_root, socket, provider = sys.argv[1:]
+script = Path(repo_root) / ".agents" / "skills" / "agentgrid" / "scripts" / "agentgrid.py"
+skill = Path(repo_root) / ".agents" / "skills" / "agentgrid" / "SKILL.md"
+context = {
+    "agentgrid_repo": repo_root,
+    "agentgrid_skill": str(skill),
+    "selected_project_path": project_path,
+    "selected_project_id": project_id,
+    "runtime_root": runtime_root,
+    "tmux_socket_name": socket,
+    "worker_adapter": provider,
+    "agentgrid_script": str(script),
+}
+Path(context_path).write_text(json.dumps(context, indent=2, sort_keys=True), encoding="utf-8")
+prompt = f"""
+You are the interactive AgentGrid Master Codex.
+
+Use the repo-scoped AgentGrid skill named `agentgrid` for all coordination. Do not act as a coding worker in the AgentGrid repository unless the user explicitly asks to modify AgentGrid itself.
+
+Selected target project:
+- project_id: {project_id}
+- path: {project_path}
+
+Runtime:
+- AgentGrid repo: {repo_root}
+- runtime_root: {runtime_root}
+- tmux socket: {socket}
+- worker adapter: {provider}
+- bootstrap context JSON: {context_path}
+
+Use this deterministic helper for project, worker, monitor, and event operations:
+
+    {script} --runtime-root {runtime_root} --socket-name {socket} --agent-adapter {provider} status --project-id {project_id}
+
+Start by reading the AgentGrid skill instructions at {skill}. Before starting or sending to a worker, inspect project and agent state through the helper scripts. Report observable project ID, worker ID, pane ID, runtime PID, and delivery status to the user. If worker readiness is unknown, ask the user to inspect or confirm before continuing that worker. Never silently retry an uncertain delivery.
+""".strip() + "\n"
+Path(prompt_path).write_text(prompt, encoding="utf-8")
+PY
+}
+
+write_observer_script() {
+  "$python" - "$observer_script" "$repo_root" "$runtime_root" "$socket" "$provider" "$monitor_log" <<'PY'
+import shlex
+import sys
+from pathlib import Path
+
+path, repo_root, runtime_root, socket, provider, monitor_log = sys.argv[1:]
+orchestrator = str(Path(repo_root) / "bin" / "agentgrid-orchestrator")
+command = f'''#!/usr/bin/env bash
+set -u
+while :; do
+  {shlex.quote(orchestrator)} --runtime-root {shlex.quote(runtime_root)} --socket-name {shlex.quote(socket)} --agent-adapter {shlex.quote(provider)} --master-provider {shlex.quote(provider)} scan --json >>{shlex.quote(monitor_log)} 2>&1 || true
+  i=0
+  while [[ "$i" -lt 10 ]]; do
+    output="$({shlex.quote(orchestrator)} --runtime-root {shlex.quote(runtime_root)} --socket-name {shlex.quote(socket)} --agent-adapter {shlex.quote(provider)} --master-provider {shlex.quote(provider)} dispatch --json 2>&1)"
+    printf 'dispatch: %s\n' "$output" >>{shlex.quote(monitor_log)}
+    case "$output" in
+      *'"delivered": false'*) break ;;
+      *'"decision": "PARK"'*|*'"decision": "REQUEUE"'*) break ;;
+    esac
+    i=$((i + 1))
+  done
+  sleep 5
+done
+'''
+Path(path).write_text(command, encoding="utf-8")
+Path(path).chmod(0o755)
+PY
+}
+
+tmux_has_session() {
+  tmux -L "$socket" has-session -t "$1" >/dev/null 2>&1
+}
+
+tmux_has_window() {
+  tmux -L "$socket" list-windows -t "$master_session" -F '#{window_name}' 2>/dev/null | grep -qx "$1"
+}
+
+start_observer() {
+  write_observer_script
+  if tmux_has_session "$master_session" && ! tmux_has_window "$observer_window"; then
+    tmux -L "$socket" new-window -d -t "$master_session" -n "$observer_window" "$observer_script"
+  fi
+}
+
+show_launcher_status() {
+  local master_running observer_running
+  master_running=false
+  observer_running=false
+  if tmux_has_session "$master_session"; then master_running=true; fi
+  if [[ "$master_running" == true ]] && tmux_has_window "$observer_window"; then observer_running=true; fi
+  "$python" - "$project_id" "$project_path" "$runtime_root" "$socket" "$provider" "$master_session" "$monitor_log" "$master_running" "$observer_running" <<'PY'
+import json
+import sys
+
+project_id, project_path, runtime_root, socket, provider, master_session, monitor_log, master_running, observer_running = sys.argv[1:]
+print(json.dumps({
+    "project_id": project_id,
+    "project_path": project_path,
+    "runtime_root": runtime_root,
+    "socket_name": socket,
+    "provider": provider,
+    "master_session": master_session,
+    "master_running": master_running == "true",
+    "observer_running": observer_running == "true",
+    "monitor_log": monitor_log,
+}, indent=2, sort_keys=True))
+PY
+}
+
+start_master_codex() {
+  write_bootstrap_files
+  local command
+  command="$($python - "$codex" "$repo_root" "$bootstrap_prompt" <<'PY'
+import shlex
+import sys
+from pathlib import Path
+
+codex, repo_root, prompt_path = sys.argv[1:]
+prompt = Path(prompt_path).read_text(encoding="utf-8")
+args = [codex, "-C", repo_root, "--sandbox", "workspace-write", "--ask-for-approval", "on-request", "--no-alt-screen", prompt]
+print(" ".join(shlex.quote(arg) for arg in args))
+PY
+)"
+  tmux -L "$socket" new-session -d -s "$master_session" -n "$master_window" -c "$repo_root" "$command"
+  tmux -L "$socket" set-option -t "$master_session" -q @agentgrid_master_project_id "$project_id"
+  tmux -L "$socket" set-option -t "$master_session" -q @agentgrid_runtime_root "$runtime_root"
+  start_observer
+}
+
 if [[ -n "$once" ]]; then
   set +e
   request "$once"
@@ -138,66 +294,38 @@ if [[ -n "$once" ]]; then
   exit "$status"
 fi
 
-# Only the observer runs in the background. The Master itself runs per request,
-# and Codex workers remain in tmux when this console exits.
-watch_events() { while :; do scan_once || true; sleep 5; done; }
-watch_events &
-watch_pid=$!
-trap 'kill "$watch_pid" 2>/dev/null || true; wait "$watch_pid" 2>/dev/null || true' EXIT
+if [[ "$show_status" -eq 1 ]]; then
+  show_launcher_status
+  exit 0
+fi
 
-cat <<EOF
-AgentGrid Master ($provider) - project $project_id
+if [[ "$provider" == fake ]]; then
+  echo "--fake is only the deterministic legacy path. Use --fake --once \"request\" or omit --fake to open the real Codex Master TUI." >&2
+  exit 2
+fi
+
+if tmux_has_session "$master_session"; then
+  start_observer
+  echo "Reattaching existing AgentGrid Master Codex session: $master_session:$master_window" >&2
+else
+  echo "Starting AgentGrid Master Codex session: $master_session:$master_window" >&2
+  start_master_codex
+fi
+
+cat >&2 <<EOF
 Project: $project_path
+Project ID: $project_id
 Runtime: $runtime_root
 Tmux socket: $socket
 Monitor log: $monitor_log
-Enter a request, or /help for controls. Existing workers stay alive on /quit.
+Detach from Codex/tmux with Ctrl+B then D. Worker panes keep running.
 EOF
+  echo "For a non-interactive deterministic test, use --fake --once \"request\"." >&2
 
-echo "Current workers:" >&2
-agent list --json >&2 || echo "Unable to list workers yet." >&2
+if [[ "${AGENTGRID_MASTER_NO_ATTACH:-}" == "1" ]]; then
+  echo "AGENTGRID_MASTER_NO_ATTACH=1 set; not attaching to tmux." >&2
+  show_launcher_status
+  exit 0
+fi
 
-while true; do
-  if ! IFS= read -r -p 'master> ' line; then printf '\n'; break; fi
-  case "$line" in
-    '') continue ;;
-    /quit|/exit) break ;;
-    /help)
-      cat <<'EOF'
-  <text>             Ask Master to select/start a project worker
-  /continue <text>   After inspecting a worker, confirm and allow reuse
-  /agents            List worker IDs and panes
-  /read <agent-id>    Display a worker's current terminal output
-  /attach            Attach to worker tmux session (Ctrl+B, D detaches)
-  /history           Show persisted Master requests/decisions
-  /scan              Scan monitor and dispatch pending events now
-  /quit              Leave this console; existing workers keep running
-EOF
-      ;;
-    /agents) agent list --json || true ;;
-    /history) ag master-history --json || true ;;
-    /scan) scan_once && echo "Scan complete; log: $monitor_log" || echo "Scan failed; log: $monitor_log" ;;
-    /read\ *) agent read "${line#/read }" || true ;;
-    /attach)
-      if ! tmux -L "$socket" attach -t agentgrid-agents; then
-        echo 'No running worker session to attach to yet.' >&2
-      fi
-      ;;
-    /continue\ *)
-      if [[ -z "${line#/continue }" ]]; then echo 'Provide a request after /continue.'; continue; fi
-      if IFS= read -r -p 'Have you checked the existing worker is ready? Type YES: ' answer && [[ "$answer" == YES ]]; then
-        request "${line#/continue }" --allow-continue || echo 'Master request parked or failed; inspect the result above.' >&2
-      else
-        echo 'Not sent.'
-      fi
-      ;;
-    /*) echo 'Unknown command. Type /help.' ;;
-    *) request "$line" || echo 'Master request parked or failed; inspect the result above.' >&2 ;;
-  esac
-done
-
-cat <<EOF
-Master console closed; workers were not stopped.
-Resume with the same command. To inspect: tmux -L "$socket" attach -t agentgrid-agents
-Monitor log: $monitor_log
-EOF
+exec tmux -L "$socket" attach -t "$master_session:$master_window"

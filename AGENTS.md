@@ -212,13 +212,14 @@ One-command Master Codex launcher examples:
 ```sh
 export PATH="/absolute/path/to/agentgrid/bin:$PATH"
 cd /path/to/project
+master_codex
+master_codex --status
 master_codex --fake --once "Read README.md"
-master_codex --project /path/to/disposable-repo
 ```
 
-`bin/master_codex` is the supported supervised launcher. With no `--project`, it uses the current Git repository root when available; `--project PATH` intentionally allows explicit non-Git disposable directories. The launcher registers the project, creates or reuses runtime state, uses an isolated tmux socket, and leaves worker panes running on `/quit`, EOF, or Ctrl-C. The default runtime is provider-separated: `master-codex` for real Codex and `master-fake` for deterministic local tests.
+`bin/master_codex` is the supported supervised launcher. The default path starts or reattaches a real interactive Codex Master TUI in an AgentGrid-owned tmux session, not the legacy `master>` shell. With no `--project`, it uses the current Git repository root when available; `--project PATH` intentionally allows explicit non-Git disposable directories. The launcher registers the project, creates or reuses runtime state, uses an isolated tmux socket, starts an observer window, and leaves worker panes running when the user detaches or exits Codex. The default runtime is provider-separated: `master-codex` for real Codex and `master-fake` for deterministic local tests.
 
-Do not describe `agentgrid-orchestrator` or `master_codex` as a complete autonomous Codex Master yet. It is currently the Master boundary with deterministic fake-agent runtime wiring, a supervised one-command launcher, an MVP Codex Agent Adapter, and an MVP `codex exec` Master provider. Codex semantic completion, approval detection, background Master autonomy, and autonomous coding loops are not implemented.
+The interactive Master discovers the repo-scoped `.agents/skills/agentgrid/SKILL.md` because the launcher starts Codex with `-C` set to the AgentGrid repository and passes the selected project through bootstrap context. Do not copy `.agents` into user projects. Do not describe `agentgrid-orchestrator` or `master_codex` as a complete autonomous Codex Master yet. It is currently the Master boundary with deterministic fake-agent runtime wiring, a supervised interactive Codex launcher, an MVP Codex Agent Adapter, an MVP `codex exec` legacy Master provider, and AgentGrid skill helper scripts. Codex semantic completion, approval detection, idle Master wake-up, and autonomous coding loops are not implemented.
 
 ## Validation Workflow
 
@@ -244,6 +245,7 @@ For changes involving tmux behavior, prefer isolated tmux sockets such as `tmux 
 - Preserve Master request IDs and `delivery_uncertain` semantics. Do not blindly retry parked, failed, timed-out, or uncertain delivery without explicit user confirmation.
 - Treat fake and real Codex launcher modes as separate runtimes by default so deterministic test workers are not silently mixed with real workers.
 - Do not claim real Master or real worker validation unless an actual credentialed `codex` smoke test was run; fake E2E only proves the deterministic infrastructure path.
+- The current Master UX is a persistent interactive Codex TUI in tmux. Keep the old `codex exec` Master workflow only as a legacy/API fixture unless a prompt explicitly asks to remove it.
 
 ## State and Persistence
 

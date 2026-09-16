@@ -1,11 +1,42 @@
 # One-command Master Codex launcher
 
-From the AgentGrid repository root, run `./bin/master_codex --project /absolute/path/to/a/test-repo`. Or add the AgentGrid `bin/` directory to your `PATH`, `cd` into a project, and run `master_codex` with no arguments. When run from inside a Git repository, the launcher registers the repository root; `--project PATH` overrides that and also supports explicit non-Git disposable directories. No separate `open-project`, runtime directory, tmux socket, or Master command setup is needed. The first run registers the selected existing directory, and future runs reuse its stable project ID and persisted runtime.
+`bin/master_codex` starts or reattaches a dedicated AgentGrid-owned interactive Codex Master TUI in an isolated tmux session. The ordinary path is now a real persistent Codex session, not the legacy `master>` shell and not one `codex exec` call per user message.
 
-Prerequisites: `python3.11`, `tmux`, and an installed, authenticated `codex` CLI. Help and `--fake` do not require Codex credentials. The launcher reports the installed `codex --version`, but the current Codex CLI does not expose a reliable non-interactive authentication readiness check, so real provider failures are surfaced on the first real request. Try `./bin/master_codex --fake --project /path/to/test-repo` to exercise the launcher without Codex credentials. For a single request, use `./bin/master_codex --project /path/to/test-repo --once "Read README.md; do not change files"`.
+Quick start from any project:
 
-Inside the interactive console, type a request and press Enter. `/agents` lists worker IDs, `/read ag-001` shows a worker's output, `/attach` enters its tmux session (Ctrl+B then D to detach), `/history` shows Master decisions, and `/scan` runs the monitor/dispatcher immediately. The observer scans and dispatches events every five seconds while the console is open; these events **do not** make the Master autonomous or prove Codex turn completion. To reuse a worker, inspect its output and enter `/continue <request>`, then type `YES` to acknowledge it is ready. `/continue` approval is scoped to that selected request and worker. `/quit`, EOF, and Ctrl-C stop only the launcher observer and **leave worker panes running**. On the next launch, persisted projects, agents, and history are reused.
+```sh
+export PATH="/absolute/path/to/agentgrid/bin:$PATH"
+cd /path/to/project
+master_codex
+```
 
-The default runtime is `${XDG_STATE_HOME:-$HOME/.local/state}/agentgrid/master-codex` for the real Codex path and `${XDG_STATE_HOME:-$HOME/.local/state}/agentgrid/master-fake` for `--fake`, so fake and real workers are not silently mixed. The default tmux socket is `agentgrid-master-$(id -u)`. Use `--runtime-root DIR` and `--socket-name NAME` to isolate a pilot; or set `AGENTGRID_RUNTIME_ROOT` and `AGENTGRID_SOCKET_NAME`. Do not delete the runtime or kill the socket while workers are running. The log is `<runtime-root>/monitor.log`. Inspect a specific worker with `./bin/agentgrid-agent --registry <runtime-root>/agents.sqlite3 --socket-name <socket-name> inspect <agent-id> --json`; stop it with the same flags followed by `stop <agent-id> --json`.
+When run inside a Git repository, the launcher registers the Git root as the selected project. Use `--project /path/to/disposable-repo` to target another existing directory, including an explicit non-Git disposable test directory. Startup does not initialize Git or modify project files.
 
-**Safety:** first test on a disposable repository. Workers use the Codex adapter's workspace-write sandbox with on-request approval. Master-selected routes are executed through the same provider-neutral policy boundary as normal Orchestrator requests. `--once` returns nonzero for denied, failed, rejected, or parked requests while preserving parseable decision JSON on stdout. Worker completion/approval interpretation and a self-running coding loop are not implemented. This launcher does not install software, log into Codex, create a Git repository, grant extra permissions, or delete existing workers/state.
+Prerequisites: `python3.11`, `tmux`, and an installed/authenticated `codex` CLI. The launcher uses documented interactive Codex flags: `codex -C <agentgrid-repo> --sandbox workspace-write --ask-for-approval on-request --no-alt-screen <bootstrap-prompt>`. It checks `codex --version` and `codex doctor --summary --no-color --ascii` before opening a real Master session. Help, `--status`, and `--fake --once` do not require Codex credentials.
+
+The Master runs with CWD set to the AgentGrid repository so the repo-scoped `.agents/skills/agentgrid/SKILL.md` is discoverable. The bootstrap prompt and JSON context identify the selected target project, runtime root, tmux socket, worker adapter, and helper script. The Master should use `.agents/skills/agentgrid/scripts/agentgrid.py` to inspect projects/workers, start or reuse workers, read output, scan/dispatch events, and stop scoped workers.
+
+Useful commands:
+
+```sh
+master_codex --status
+master_codex --project /path/to/disposable-repo
+AGENTGRID_MASTER_NO_ATTACH=1 master_codex --project /path/to/repo
+master_codex --fake --once "Read README.md"
+```
+
+Runtime defaults are separated by provider: `${XDG_STATE_HOME:-$HOME/.local/state}/agentgrid/master-codex` for real Codex and `${XDG_STATE_HOME:-$HOME/.local/state}/agentgrid/master-fake` for deterministic fake tests. The default tmux socket is `agentgrid-master-$(id -u)`. Use `--runtime-root DIR` and `--socket-name NAME` to isolate a pilot. The monitor/dispatcher observer runs in an `agentgrid-master:observer` tmux window while the Master session exists; it stores logs in `<runtime-root>/monitor.log` and does not make Codex autonomous or wake an idle Master.
+
+Detach from the Master TUI with `Ctrl+B`, then `D`. Detaching or exiting the Master leaves worker panes running. Re-running `master_codex` reattaches the existing `agentgrid-master:master` pane when it exists; if the Master tmux session is gone, the launcher starts a new interactive Codex Master and preserves AgentGrid project/worker state. Conversation context is not restored unless Codex itself supports that in the visible TUI session.
+
+Inspect or stop a worker manually:
+
+```sh
+./bin/agentgrid-agent --registry <runtime-root>/agents.sqlite3 --socket-name <socket-name> inspect ag-001 --json
+./bin/agentgrid-agent --registry <runtime-root>/agents.sqlite3 --socket-name <socket-name> read ag-001
+./bin/agentgrid-agent --registry <runtime-root>/agents.sqlite3 --socket-name <socket-name> stop ag-001 --json
+```
+
+Safety: first test on a disposable repository. Workers use the Codex adapter's workspace-write sandbox with on-request approval. Master coordination must go through the AgentGrid skill helper and existing policy boundary before starting workers or sending bytes. `--once` remains as a deterministic legacy/API path for tests and returns nonzero for denied, failed, rejected, or parked requests while preserving decision JSON on stdout.
+
+Known limitations: no Codex semantic completion detection, no approval/waiting-input parser, no automatic readiness detection, no idle Master wake-up, no automatic retry of uncertain delivery, and no autonomous build/test repair loop. Fake E2E tests validate infrastructure only; a real Master/worker pilot requires an authenticated local Codex CLI.
