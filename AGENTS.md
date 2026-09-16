@@ -151,7 +151,7 @@ Primary implemented modules:
 - `agentgrid-project-context/`: Builds context packages from persistent and live project information.
 - `agentgrid-context-router/`: Chooses whether work should continue an existing agent, start a new agent, use another project, or create a project.
 - `agentgrid-policy/`: Returns explicit `ALLOW`, `ASK_USER`, or `DENY` decisions for actions.
-- `agentgrid-orchestrator/`: Defines the high-level Master boundary. The CLI can run the deterministic fake-agent vertical slice with `--runtime-root`, but it does not yet launch real Codex workers.
+- `agentgrid-orchestrator/`: Defines the high-level Master boundary. The CLI can run the deterministic fake-agent vertical slice with `--runtime-root` and can select the MVP `codex` adapter without changing Orchestrator or Router logic.
 - `agentgrid-execution/`: Runs builds, tests, deployments, and validation workflows behind adapters.
 - `agentgrid-recovery/`: Reconciles persisted AgentGrid state with live runtime state after restart.
 - `agentgrid-observability/`: Provides structured diagnostics and logging primitives.
@@ -206,7 +206,7 @@ Orchestrator examples:
 ./bin/agentgrid-orchestrator event '{"type":"AGENT_EXITED","agent_id":"ag-001"}' --json
 ```
 
-Do not describe `agentgrid-orchestrator` as a working Codex Master yet. It is currently the Master boundary with deterministic fake-agent runtime wiring. A real Codex adapter or Codex-launching Master path should be added explicitly before claiming that capability.
+Do not describe `agentgrid-orchestrator` as a complete Codex Master yet. It is currently the Master boundary with deterministic fake-agent runtime wiring plus an MVP Codex Agent Adapter. Codex semantic completion, approval detection, and autonomous coding loops are not implemented.
 
 ## Validation Workflow
 

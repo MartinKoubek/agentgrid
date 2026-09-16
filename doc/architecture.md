@@ -53,7 +53,7 @@ flowchart TD
 
 `agentgrid-orchestrator/agentgrid_orchestrator/runtime.py` is the current composition root. It is allowed to instantiate concrete module implementations and wire them together while lower-level modules keep depending on their direct interfaces.
 
-The implemented V1 vertical slice uses the deterministic `fake` agent adapter:
+The implemented V1 vertical slice uses the deterministic `fake` agent adapter by default:
 
 ```text
 User request
@@ -75,7 +75,7 @@ Fake Agent / runtime
     -> Orchestrator
 ```
 
-Real Codex workers and Codex-specific protocol parsing are not implemented yet.
+The MVP `codex` adapter can replace the fake adapter at the Agent Manager boundary and run the local Codex CLI in tmux. Codex-specific protocol parsing, semantic completion detection, and approval-state interpretation are not implemented yet.
 
 ## Core communication principle
 

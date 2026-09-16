@@ -34,9 +34,10 @@ Infrastructure details stay behind adapters. In particular, no module except `ag
 
 - DONE: the deterministic fake-agent vertical runtime slice is wired through Orchestrator, Project Context Service, Context Router, Agent Manager, `agentgrid-tmux`, Monitor, Event Queue, and Dispatcher.
 - DONE: project agent membership is separated from Agent Manager runtime liveness.
+- MVP: `CodexAgentAdapter` can launch and communicate with the local Codex CLI through `agentgrid-tmux` using the same Agent Manager contract as the fake adapter.
 - MVP: standalone services such as Shell Logger, Project Memory, Policy, Persistence, Execution, and Observability expose basic local behavior and tests.
 - SKELETON: advanced recovery, connector framework, cross-system context, and platform E2E drivers are intentionally minimal.
-- PLANNED: real Codex worker integration, Claude adapters, Gmail, Slack, GitHub, Calendar, semantic search, and autonomous coding loops are not implemented.
+- PLANNED: Codex semantic protocol monitoring, Claude adapters, Gmail, Slack, GitHub, Calendar, semantic search, and autonomous coding loops are not implemented.
 
 ## Validation
 

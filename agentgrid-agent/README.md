@@ -45,6 +45,12 @@ Start a fake deterministic agent:
 ./agentgrid-agent/bin/agentgrid-agent --socket-name agentgrid-demo start --adapter fake
 ```
 
+Start a Codex-backed agent in a project repository:
+
+```sh
+./agentgrid-agent/bin/agentgrid-agent --socket-name agentgrid-codex --registry /tmp/agentgrid-codex-agents.sqlite3 start --adapter codex --cwd /path/to/repo
+```
+
 List and inspect agents:
 
 ```sh
@@ -119,6 +125,27 @@ class AgentAdapter:
 ```
 
 The included `fake` adapter is deterministic and intended for local tests. It responds to input with `ACK: <input>` and exits when it receives `exit`.
+
+The included `codex` adapter is an MVP provider adapter for the local Codex CLI. It launches `codex --no-alt-screen --ask-for-approval on-request --sandbox workspace-write` inside a tmux pane through `agentgrid-tmux`, reuses the user's existing Codex CLI authentication and configuration, sends prompts through tmux text/key APIs, reads terminal output through pane capture, and uses the shared endpoint/runtime PID handshake for liveness.
+
+Manual Codex smoke test:
+
+```sh
+tmux -L agentgrid-codex start-server
+./bin/agentgrid-agent --socket-name agentgrid-codex --registry /tmp/agentgrid-codex-agents.sqlite3 start --adapter codex --cwd /path/to/repo --json
+./bin/agentgrid-agent --socket-name agentgrid-codex --registry /tmp/agentgrid-codex-agents.sqlite3 send ag-001 "Read README.md and tell me the project name."
+./bin/agentgrid-agent --socket-name agentgrid-codex --registry /tmp/agentgrid-codex-agents.sqlite3 read ag-001
+./bin/agentgrid-agent --socket-name agentgrid-codex --registry /tmp/agentgrid-codex-agents.sqlite3 send ag-001 "Now summarize the test command."
+./bin/agentgrid-agent --socket-name agentgrid-codex --registry /tmp/agentgrid-codex-agents.sqlite3 stop ag-001
+tmux -L agentgrid-codex kill-server
+```
+
+Known Codex adapter limitations for V1:
+
+- No semantic task completion detection.
+- No Codex approval or waiting-input detection.
+- No automatic task result extraction.
+- No autonomous build, test, or repair loop.
 
 ## Liveness
 

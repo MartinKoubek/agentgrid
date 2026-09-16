@@ -25,9 +25,15 @@ class FakePolicy:
 class FakeProject:
     def __init__(self) -> None:
         self.touched = False
+        self.path = "/tmp/demo-project"
+        self.agents = []
+        self.config = {}
 
     def touch(self) -> None:
         self.touched = True
+
+    def add_agent(self, agent_id):
+        self.agents.append(agent_id)
 
 
 class FakeProjectManager:
@@ -42,10 +48,42 @@ class FakeProjectManager:
         self.saved.append(project)
 
 
+class RecordingAgentManager:
+    def __init__(self) -> None:
+        self.started = []
+        self.sent = []
+
+    def start(self, **kwargs):
+        self.started.append(kwargs)
+        return type("Agent", (), {"id": "ag-001"})()
+
+    def send(self, agent_id, text):
+        self.sent.append((agent_id, text))
+
+
 def test_orchestrator_delegates_routing_and_policy() -> None:
     decision = Orchestrator(router=FakeRouter(), policy_engine=FakePolicy()).handle_request("fix bug", "demo")
     assert decision.action == "START_AGENT"
     assert decision.project_id == "demo"
+
+
+def test_orchestrator_starts_agent_with_project_cwd() -> None:
+    agent_manager = RecordingAgentManager()
+    project_manager = FakeProjectManager()
+
+    decision = Orchestrator(
+        router=FakeRouter(),
+        policy_engine=FakePolicy(),
+        agent_manager=agent_manager,
+        project_manager=project_manager,
+        agent_adapter="codex",
+    ).handle_request("fix bug", "demo")
+
+    assert decision.action == "START_AGENT"
+    assert agent_manager.started == [
+        {"adapter": "codex", "session": "agentgrid-agents", "cwd": "/tmp/demo-project"}
+    ]
+    assert agent_manager.sent == [("ag-001", "fix bug")]
 
 
 def test_orchestrator_accepts_event() -> None:

@@ -13,6 +13,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--runtime-root")
     parser.add_argument("--socket-name")
+    parser.add_argument("--agent-adapter", default="fake")
+    parser.add_argument("--agent-session", default="agentgrid-agents")
     sub = parser.add_subparsers(dest="command", required=True)
     request = sub.add_parser("request", parents=[common]); request.add_argument("text"); request.add_argument("--project-id")
     event = sub.add_parser("event", parents=[common]); event.add_argument("event_json")
@@ -23,7 +25,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.runtime_root:
         from agentgrid_orchestrator.runtime import AgentGridRuntime
 
-        runtime = AgentGridRuntime(Path(args.runtime_root), socket_name=args.socket_name)
+        runtime = AgentGridRuntime(
+            Path(args.runtime_root),
+            socket_name=args.socket_name,
+            agent_adapter=args.agent_adapter,
+            agent_session=args.agent_session,
+        )
         if args.command == "request":
             output = runtime.orchestrator.handle_request(args.text, args.project_id)
         elif args.command == "event":

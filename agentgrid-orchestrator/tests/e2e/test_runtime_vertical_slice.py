@@ -11,9 +11,49 @@ from agentgrid_dispatcher import DispatchDecision
 from agentgrid_event_queue import EventStatus
 from agentgrid_orchestrator.runtime import AgentGridRuntime
 from tmuxio.errors import TmuxCommandError
+from agentgrid_agent.adapters.base import AgentAdapter
+from agentgrid_agent.models import Agent, AgentConfig
 
 
 pytestmark = pytest.mark.e2e
+
+
+class ProviderSubstitutionAdapter(AgentAdapter):
+    name = "test-provider"
+
+    def __init__(self, tmux) -> None:
+        self.tmux = tmux
+
+    def default_command(self) -> str:
+        return (
+            "python3.11 -u -c \""
+            "import sys; "
+            "print('TEST_PROVIDER_READY', flush=True); "
+            "\nfor line in sys.stdin:"
+            "\n    text=line.rstrip('\\n')"
+            "\n    if text == 'exit':"
+            "\n        print('TEST_PROVIDER_BYE', flush=True); break"
+            "\n    print('TEST_PROVIDER_ACK: ' + text, flush=True)"
+            "\""
+        )
+
+    def start(self, pane, config: AgentConfig) -> None:
+        return None
+
+    def send(self, agent: Agent, text: str) -> None:
+        self.tmux.write(agent.pane_id, text)
+
+    def read(self, agent: Agent) -> str:
+        return self.tmux.read(agent.pane_id)
+
+    def is_alive(self, agent: Agent) -> bool:
+        result = self.tmux.handshake(agent.pane_id, active=True, expected_endpoint_id=agent.endpoint_id)
+        runtime_matches = agent.runtime_pid is not None and result.runtime_pid == agent.runtime_pid
+        return result.pane_alive is True and result.agent_alive is True and result.matched_endpoint_id is True and runtime_matches
+
+    def stop(self, agent: Agent) -> None:
+        if self.is_alive(agent):
+            self.tmux.write(agent.pane_id, "exit")
 
 
 def wait_for_output(runtime: AgentGridRuntime, agent_id: str, text: str, timeout: float = 3.0) -> str:
@@ -166,6 +206,37 @@ def test_runtime_starts_new_agent_for_unrelated_task(tmp_path) -> None:
         project = runtime.project_manager.get_project("project-a")
         assert project.agents == ["ag-001", "ag-002"]
         assert len(runtime.agent_manager.list()) == 2
+    finally:
+        for agent in runtime.agent_manager.list():
+            if agent.state == AgentState.RUNNING:
+                runtime.agent_manager.stop(agent.id)
+        runtime.tmux.kill_server()
+
+
+def test_runtime_can_substitute_agent_adapter_without_router_changes(tmp_path) -> None:
+    if shutil.which("tmux") is None:
+        pytest.skip("tmux is not installed")
+
+    socket_name = f"agentgrid-provider-test-{uuid.uuid4().hex}"
+    require_tmux_runtime(tmp_path, socket_name)
+    runtime = AgentGridRuntime(tmp_path / "runtime", socket_name=socket_name, agent_adapter="test-provider")
+    runtime.agent_manager.register_adapter("test-provider", ProviderSubstitutionAdapter(runtime.tmux))
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+
+    try:
+        runtime.project_manager.open_project("project-a", str(project_path), name="Project A")
+
+        first = runtime.orchestrator.handle_request("work on scheduler", "project-a")
+        assert first.action == "START_AGENT"
+        assert first.agent_id == "ag-001"
+        wait_for_output(runtime, first.agent_id, "TEST_PROVIDER_ACK: work on scheduler")
+
+        second = runtime.orchestrator.handle_request("add scheduler test", "project-a")
+        assert second.action == "CONTINUE_AGENT"
+        assert second.agent_id == first.agent_id
+        assert len(runtime.agent_manager.list()) == 1
+        wait_for_output(runtime, first.agent_id, "TEST_PROVIDER_ACK: add scheduler test")
     finally:
         for agent in runtime.agent_manager.list():
             if agent.state == AgentState.RUNNING:

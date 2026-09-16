@@ -170,7 +170,7 @@ Status meanings:
 Milestone status:
 
 - Milestone A through D are implemented for the deterministic fake-agent runtime slice.
-- Real Codex integration, external connectors, platform E2E drivers, and autonomous coding loops remain planned or skeleton work.
+- The Codex Agent Adapter is MVP. Codex protocol monitoring, external connectors, platform E2E drivers, and autonomous coding loops remain planned or skeleton work.
 
 ## Milestone A - Managed worker
 

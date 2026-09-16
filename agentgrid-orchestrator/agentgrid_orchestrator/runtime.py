@@ -47,15 +47,19 @@ class AgentGridRuntime:
         tmux: TmuxClient | None = None,
         agent_adapter: str = "fake",
         agent_session: str = "agentgrid-agents",
+        adapters: dict | None = None,
     ) -> None:
         self.paths = RuntimePaths.under(root)
         self.paths.root.mkdir(parents=True, exist_ok=True)
 
         self.tmux = tmux or TmuxClient(socket_name=socket_name)
+        runtime_adapters = default_adapters(self.tmux)
+        if adapters:
+            runtime_adapters.update(adapters)
         self.agent_manager = AgentManager(
             tmux=self.tmux,
             registry=FileAgentRegistry(self.paths.agents),
-            adapters=default_adapters(self.tmux),
+            adapters=runtime_adapters,
         )
         self.monitor = Monitor(agent_manager=self.agent_manager, state_path=self.paths.monitor)
         self.event_queue = EventQueue(self.paths.events)

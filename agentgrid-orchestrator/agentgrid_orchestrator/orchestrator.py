@@ -51,13 +51,18 @@ class Orchestrator:
         if route_type == "START_AGENT":
             if not self.agent_manager:
                 return OrchestratorDecision(route_type, route.reason, project_id=route.project_id or target_project_id)
-            agent = self.agent_manager.start(adapter=self.agent_adapter, session=self.agent_session)
+            route_project_id = route.project_id or target_project_id
+            agent = self.agent_manager.start(
+                adapter=self.agent_adapter,
+                session=self.agent_session,
+                cwd=self._project_path(route_project_id),
+            )
             self.agent_manager.send(agent.id, request)
-            self._attach_agent(route.project_id or target_project_id, agent.id, request)
+            self._attach_agent(route_project_id, agent.id, request)
             return OrchestratorDecision(
                 route_type,
                 route.reason,
-                project_id=route.project_id or target_project_id,
+                project_id=route_project_id,
                 agent_id=agent.id,
                 details={"request": request},
             )
@@ -142,6 +147,15 @@ class Orchestrator:
         project.config.setdefault("agent_tasks", {})[agent_id] = request
         project.touch()
         self.project_manager.save(project)
+
+    def _project_path(self, project_id: str) -> str | None:
+        if not self.project_manager:
+            return None
+        try:
+            project = self.project_manager.get_project(project_id)
+        except Exception:
+            return None
+        return getattr(project, "path", None)
 
     def _remember_agent_task(self, project_id: str, agent_id: str, request: str) -> None:
         if not self.project_manager:
