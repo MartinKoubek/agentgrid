@@ -39,6 +39,9 @@ agentgrid-tmux = { path = "../agentgrid-tmux", editable = true }
 [tool.setuptools]
 packages = ["agentgrid_orchestrator"]
 
+[tool.setuptools.package-data]
+agentgrid_orchestrator = ["master_instructions.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

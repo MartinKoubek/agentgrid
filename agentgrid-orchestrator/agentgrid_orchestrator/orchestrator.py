@@ -34,6 +34,10 @@ class Orchestrator:
             return OrchestratorDecision("ASK_USER", "policy requires user approval", project_id=target_project_id)
         if route is None:
             return OrchestratorDecision("NOOP", "no router configured", project_id=target_project_id)
+        return self.execute_route(request, route, target_project_id)
+
+    def execute_route(self, request: str, route, target_project_id: str | None = None) -> OrchestratorDecision:
+        target_project_id = target_project_id or getattr(route, "project_id", None) or "default"
         route_type = getattr(route.route, "value", route.route)
 
         if route_type == "CONTINUE_AGENT" and route.agent_id:

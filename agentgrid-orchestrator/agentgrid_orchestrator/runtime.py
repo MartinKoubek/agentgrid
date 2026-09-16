@@ -9,6 +9,7 @@ from agentgrid_context_router import ContextRouter
 from agentgrid_dispatcher import DispatchDecision, Dispatcher
 from agentgrid_event_queue import EventQueue, EventRecord
 from agentgrid_monitor import Event, Monitor
+from agentgrid_orchestrator.master import CodexMasterProvider, FakeMasterProvider, MasterRequestStore, MasterWorkflow
 from agentgrid_orchestrator.orchestrator import Orchestrator
 from agentgrid_policy import PolicyEngine
 from agentgrid_project_context import ProjectContextBuilder
@@ -25,6 +26,7 @@ class RuntimePaths:
     monitor: Path
     projects: Path
     memory: Path
+    master: Path
 
     @classmethod
     def under(cls, root: str | Path) -> RuntimePaths:
@@ -36,6 +38,7 @@ class RuntimePaths:
             monitor=base / "monitor.sqlite3",
             projects=base / "projects.sqlite3",
             memory=base / "project-memory.sqlite3",
+            master=base / "master-requests.sqlite3",
         )
 
 
@@ -48,6 +51,7 @@ class AgentGridRuntime:
         agent_adapter: str = "fake",
         agent_session: str = "agentgrid-agents",
         adapters: dict | None = None,
+        master_provider=None,
     ) -> None:
         self.paths = RuntimePaths.under(root)
         self.paths.root.mkdir(parents=True, exist_ok=True)
@@ -66,6 +70,7 @@ class AgentGridRuntime:
         self.dispatcher = Dispatcher(self.event_queue)
         self.project_manager = ProjectManager(self.paths.projects)
         self.project_memory = ProjectMemory(self.paths.memory)
+        self.master_requests = MasterRequestStore(self.paths.master)
         self.project_context = ProjectContextBuilder(
             project_manager=self.project_manager,
             agent_manager=self.agent_manager,
@@ -83,6 +88,29 @@ class AgentGridRuntime:
             agent_adapter=agent_adapter,
             agent_session=agent_session,
         )
+        self.master = MasterWorkflow(
+            provider=master_provider or FakeMasterProvider(),
+            orchestrator=self.orchestrator,
+            project_manager=self.project_manager,
+            project_context=self.project_context,
+            agent_manager=self.agent_manager,
+            request_store=self.master_requests,
+        )
+
+    @classmethod
+    def with_master_provider(
+        cls,
+        root: str | Path,
+        master_provider_name: str = "fake",
+        **kwargs,
+    ) -> AgentGridRuntime:
+        if master_provider_name == "fake":
+            provider = FakeMasterProvider()
+        elif master_provider_name == "codex":
+            provider = CodexMasterProvider(cwd=Path(root))
+        else:
+            raise ValueError(f"unknown master provider: {master_provider_name}")
+        return cls(root, master_provider=provider, **kwargs)
 
     def enqueue_monitor_events(self) -> list[EventRecord]:
         return enqueue_monitor_events(self.monitor.scan(), self.event_queue, self.project_owner_for_agent)

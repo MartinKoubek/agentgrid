@@ -9,6 +9,7 @@ import pytest
 from agentgrid_agent.models import AgentState
 from agentgrid_dispatcher import DispatchDecision
 from agentgrid_event_queue import EventStatus
+from agentgrid_orchestrator.master import FakeMasterProvider
 from agentgrid_orchestrator.runtime import AgentGridRuntime
 from tmuxio.errors import TmuxCommandError
 from agentgrid_agent.adapters.base import AgentAdapter
@@ -237,6 +238,72 @@ def test_runtime_can_substitute_agent_adapter_without_router_changes(tmp_path) -
         assert second.agent_id == first.agent_id
         assert len(runtime.agent_manager.list()) == 1
         wait_for_output(runtime, first.agent_id, "TEST_PROVIDER_ACK: add scheduler test")
+    finally:
+        for agent in runtime.agent_manager.list():
+            if agent.state == AgentState.RUNNING:
+                runtime.agent_manager.stop(agent.id)
+        runtime.tmux.kill_server()
+
+
+def test_master_workflow_plans_and_delegates_to_fake_worker(tmp_path) -> None:
+    if shutil.which("tmux") is None:
+        pytest.skip("tmux is not installed")
+
+    socket_name = f"agentgrid-master-test-{uuid.uuid4().hex}"
+    require_tmux_runtime(tmp_path, socket_name)
+    provider = FakeMasterProvider(
+        [
+            {"version": 1, "action": "START_AGENT", "project_id": "project-a", "reason": "new scheduler worker"},
+            {"version": 1, "action": "CONTINUE_AGENT", "project_id": "project-a", "agent_id": "ag-001", "reason": "same scheduler task"},
+            {"version": 1, "action": "CONTINUE_AGENT", "project_id": "project-a", "agent_id": "ag-001", "reason": "same scheduler task"},
+            {"version": 1, "action": "START_AGENT", "project_id": "project-a", "reason": "database migration is unrelated"},
+        ]
+    )
+    runtime = AgentGridRuntime(tmp_path / "runtime", socket_name=socket_name, master_provider=provider)
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+
+    try:
+        runtime.project_manager.open_project("project-a", str(project_path), name="Project A")
+
+        first = runtime.master.handle_request("work on scheduler", "project-a", request_id="mr-1")
+        assert first.action == "START_AGENT"
+        assert first.agent_id == "ag-001"
+        first_agent = runtime.agent_manager.inspect(first.agent_id)
+        assert first_agent.cwd == str(project_path)
+        wait_for_output(runtime, first.agent_id, "ACK: work on scheduler")
+
+        parked = runtime.master.handle_request("add scheduler test", "project-a", request_id="mr-2")
+        assert parked.action == "PARK"
+        assert parked.agent_id == first.agent_id
+        assert len(runtime.agent_manager.list()) == 1
+
+        continued = runtime.master.handle_request(
+            "add scheduler test",
+            "project-a",
+            request_id="mr-3",
+            allow_continue=True,
+        )
+        assert continued.action == "CONTINUE_AGENT"
+        assert continued.agent_id == first.agent_id
+        wait_for_output(runtime, first.agent_id, "ACK: add scheduler test")
+        assert runtime.agent_manager.inspect(first.agent_id).pane_id == first_agent.pane_id
+
+        unrelated = runtime.master.handle_request("investigate database migration", "project-a", request_id="mr-4")
+        assert unrelated.action == "START_AGENT"
+        assert unrelated.agent_id == "ag-002"
+        wait_for_output(runtime, unrelated.agent_id, "ACK: investigate database migration")
+
+        duplicate = runtime.master.handle_request("work on scheduler", "project-a", request_id="mr-1")
+        assert duplicate.action == "DUPLICATE_REQUEST"
+        assert len(runtime.agent_manager.list()) == 2
+
+        project = runtime.project_manager.get_project("project-a")
+        assert project.agents == ["ag-001", "ag-002"]
+        assert runtime.master_requests.get("mr-1").status == "EXECUTED"
+        assert runtime.master_requests.get("mr-2").status == "PARKED"
+        assert runtime.master_requests.get("mr-3").status == "EXECUTED"
+        assert runtime.master_requests.get("mr-4").status == "EXECUTED"
     finally:
         for agent in runtime.agent_manager.list():
             if agent.state == AgentState.RUNNING:
