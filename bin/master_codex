@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# One-command, supervised Master Codex launcher. Works with macOS's Bash 3.2.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+python="${PYTHON:-python3.11}"
+project_input="$PWD"
+runtime_root="${AGENTGRID_RUNTIME_ROOT:-${XDG_STATE_HOME:-$HOME/.local/state}/agentgrid/master}"
+socket="${AGENTGRID_SOCKET_NAME:-agentgrid-master-$(id -u)}"
+provider=codex
+once=""
+
+usage() {
+  cat <<'EOF'
+Usage: master_codex [--project PATH] [--runtime-root DIR] [--socket-name NAME] [--fake] [--once "REQUEST"]
+
+From any project directory, run master_codex to open a supervised interactive
+Master session. The first run registers that directory as an AgentGrid project.
+Use --project PATH to choose another directory. --fake selects deterministic
+Master and worker adapters for a local test; otherwise both use real Codex.
+State and worker panes persist after you quit. See /help inside the session.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    -p|--project|--runtime-root|--socket-name|--once)
+      option="$1"; shift
+      if [[ $# -eq 0 ]]; then echo "Missing argument for $option" >&2; exit 2; fi
+      case "$option" in
+        -p|--project) project_input="$1" ;;
+        --runtime-root) runtime_root="$1" ;;
+        --socket-name) socket="$1" ;;
+        --once) once="$1" ;;
+      esac
+      ;;
+    --fake) provider=fake ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+for executable in "$python" tmux; do
+  if ! command -v "$executable" >/dev/null 2>&1; then
+    echo "Required executable not found: $executable" >&2; exit 1
+  fi
+done
+if [[ "$provider" == codex ]]; then
+  if ! command -v codex >/dev/null 2>&1; then
+    echo "Codex CLI is missing. Install/login to Codex, or use --fake to test the launcher." >&2; exit 1
+  fi
+  if ! codex --version >/dev/null; then echo "Codex CLI is not working" >&2; exit 1; fi
+fi
+if [[ ! -d "$project_input" ]]; then echo "Project directory does not exist: $project_input" >&2; exit 1; fi
+project_path="$(cd "$project_input" && pwd -P)"
+mkdir -p "$runtime_root"
+runtime_root="$(cd "$runtime_root" && pwd -P)"
+project_id="$("$python" -c 'import hashlib,re,sys; from pathlib import Path; p=Path(sys.argv[1]); name=re.sub("[^a-z0-9-]+", "-", p.name.lower()).strip("-") or "project"; print(name+"-"+hashlib.sha256(str(p).encode()).hexdigest()[:8])' "$project_path")"
+monitor_log="$runtime_root/monitor.log"
+
+ag() {
+  "$repo_root/bin/agentgrid-orchestrator" --runtime-root "$runtime_root" --socket-name "$socket" \
+    --agent-adapter "$provider" --master-provider "$provider" "$@"
+}
+agent() {
+  "$repo_root/bin/agentgrid-agent" --registry "$runtime_root/agents.sqlite3" --socket-name "$socket" "$@"
+}
+scan_once() {
+  local output i
+  if ! output="$(ag scan --json 2>&1)"; then printf 'scan failed: %s\n' "$output" >>"$monitor_log"; return 1; fi
+  if [[ "$output" != '[]' ]]; then printf 'scan: %s\n' "$output" >>"$monitor_log"; fi
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    if ! output="$(ag dispatch --json 2>&1)"; then printf 'dispatch failed: %s\n' "$output" >>"$monitor_log"; return 1; fi
+    if [[ "$output" == *'"delivered": false'* ]]; then break; fi
+    printf 'dispatch: %s\n' "$output" >>"$monitor_log"
+    if [[ "$output" == *'"REQUEUE"'* ]]; then break; fi
+  done
+}
+request() {
+  local text="$1"; shift
+  local request_id
+  request_id="mr-$("$python" -c 'import uuid;print(uuid.uuid4().hex)')"
+  ag master-request "$text" --project-id "$project_id" --request-id "$request_id" "$@" --json
+}
+
+# Idempotent project registration; do not create a repository or touch its files.
+ag open-project "$project_id" --path "$project_path" --json >/dev/null
+
+if [[ -n "$once" ]]; then
+  request "$once"
+  scan_once || echo "Monitor/dispatcher error; inspect $monitor_log" >&2
+  exit 0
+fi
+
+# Only the observer runs in the background. The Master itself runs per request,
+# and Codex workers remain in tmux when this console exits.
+watch_events() { while :; do scan_once || true; sleep 5; done; }
+watch_events &
+watch_pid=$!
+trap 'kill "$watch_pid" 2>/dev/null || true; wait "$watch_pid" 2>/dev/null || true' EXIT
+
+cat <<EOF
+AgentGrid Master ($provider) — project $project_id
+Project: $project_path
+Runtime: $runtime_root
+Tmux socket: $socket
+Enter a request, or /help for controls. Existing workers stay alive on /quit.
+EOF
+
+while true; do
+  if ! IFS= read -r -p 'master> ' line; then printf '\n'; break; fi
+  case "$line" in
+    '') continue ;;
+    /quit|/exit) break ;;
+    /help)
+      cat <<'EOF'
+  <text>             Ask Master to select/start a project worker
+  /continue <text>   After inspecting a worker, confirm and allow reuse
+  /agents            List worker IDs and panes
+  /read <agent-id>    Display a worker's current terminal output
+  /attach            Attach to worker tmux session (Ctrl+B, D detaches)
+  /history           Show persisted Master requests/decisions
+  /scan              Scan monitor and dispatch pending events now
+  /quit              Leave this console; existing workers keep running
+EOF
+      ;;
+    /agents) agent list --json || true ;;
+    /history) ag master-history --json || true ;;
+    /scan) scan_once && echo "Scan complete; log: $monitor_log" || echo "Scan failed; log: $monitor_log" ;;
+    /read\ *) agent read "${line#/read }" || true ;;
+    /attach)
+      if ! tmux -L "$socket" attach -t agentgrid-agents; then
+        echo 'No running worker session to attach to yet.' >&2
+      fi
+      ;;
+    /continue\ *)
+      if [[ -z "${line#/continue }" ]]; then echo 'Provide a request after /continue.'; continue; fi
+      if IFS= read -r -p 'Have you checked the existing worker is ready? Type YES: ' answer && [[ "$answer" == YES ]]; then
+        request "${line#/continue }" --allow-continue || echo 'Master request failed; inspect the result above.' >&2
+      else
+        echo 'Not sent.'
+      fi
+      ;;
+    /*) echo 'Unknown command. Type /help.' ;;
+    *) request "$line" || echo 'Master request failed; inspect the result above.' >&2 ;;
+  esac
+done
+
+cat <<EOF
+Master console closed; workers were not stopped.
+Resume with the same command. To inspect: tmux -L "$socket" attach -t agentgrid-agents
+Monitor log: $monitor_log
+EOF
